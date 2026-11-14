@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AssetPackage Version="0.1.0">
+  <ItemSettings><ContentType>MISC</ContentType><Title>FS Copilot Controls Test</Title><Manufacturer/><Creator>FS Copilot</Creator></ItemSettings>
+  <Flags><VisibleInStore>false</VisibleInStore><CanBeReferenced>false</CanBeReferenced></Flags>
+  <PackageOrderHint>MISC</PackageOrderHint>
+  <AssetGroups>
+    <AssetGroup Name="EFB">
+      <Type Version="0">Copy</Type>
+      <AssetDir>PackageSources\FsCopilotControls\</AssetDir>
+      <OutputDir>html_ui\efb_ui\efb_apps\FsCopilotControls\</OutputDir>
+    </AssetGroup>
+    <AssetGroup Name="ControlModule">
+      <Type Version="0">Copy</Type>
+      <AssetDir>PackageSources\Modules\</AssetDir>
+      <OutputDir>modules\</OutputDir>
+    </AssetGroup>
+  </AssetGroups>
+</AssetPackage>

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FS Copilot Controls — UI preview</title>
+  <link rel="stylesheet" href="src/controls.css">
+  <style>html, body, #app { width: 100%; height: 100%; margin: 0; }</style>
+</head>
+<body>
+  <main id="app"></main>
+  <script>window.FSC_CONTROLS_PREVIEW = true;</script>
+  <script src="PackageSources/FsCopilotControls/FsCopilotControls.js"></script>
+  <script>
+    // Intentionally no fake simulator: the preview displays the disconnected UI.
+    var controller = new FscControls.Controller(FscControls.createCommBusTransport());
+    FscControls.mount(document.getElementById('app'), controller, { preview: true });
+    controller.start();
+    window.addEventListener('unload', function () { controller.dispose(); });
+  </script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+PackageSources/Modules/*.wasm
+Packages/
+PackagesMetadata/
+_PackageInt/
