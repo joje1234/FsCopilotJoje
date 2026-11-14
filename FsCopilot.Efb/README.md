@@ -9,6 +9,9 @@ The package runs entirely inside MSFS. It does not require the FS Copilot deskto
 app, another player, a supported-aircraft YAML profile, or a network connection.
 The existing shared-cockpit application and bridge are unchanged.
 
+For the agreed requirements, broader implementation plan, and the next Windows
+Codex session's priorities, read [the project handoff](../HANDOFF.md).
+
 ## Build on Windows
 
 Prerequisites:

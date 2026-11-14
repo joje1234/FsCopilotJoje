@@ -42,6 +42,9 @@ However, development is primarily focused on MSFS 2024, so some features may not
 
 ## 🧩 For Developers
 
+For the EFB control prototype, agreed feature plan, and Windows continuation steps,
+start with [FS Copilot EFB plan and Windows handoff](HANDOFF.md).
+
 FS Copilot is built with **.NET 9 (C#)** and designed for modular extensibility.
 It includes a flexible networking layer using **peer-to-peer UDP connection by hole punching**,
 allowing direct low-latency connections without external servers.
