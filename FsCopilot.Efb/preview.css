@@ -1,0 +1,39 @@
+:root { --fsc-radius: 12px; color-scheme: dark; font: 14px/1.5 Inter, "Segoe UI", Arial, sans-serif; color: #d8e3eb; background: #0b1119; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 28px 36px 36px; background: radial-gradient(ellipse at 30% 25%, #15202c, #0b1119 75%); min-height: 100vh; }
+.preview-header { max-width: 1200px; margin: 0 auto 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.preview-eyebrow { font-size: 10px; letter-spacing: 2px; color: #8c9da9; font-weight: 600; }
+h1 { font-size: 20px; font-weight: 500; margin: 4px 0; color: #ecf1f4; }
+.preview-badge { border: 1px solid #3b4a52; border-radius: var(--fsc-radius); padding: 6px 12px; color: #a5b8ae; font-size: 11px; white-space: nowrap; }
+.preview-layout { display: grid; grid-template-columns: minmax(0, 1fr) 276px; align-items: start; max-width: 1200px; gap: 28px; margin: auto; }
+.preview-stage { min-width: 0; display: flex; flex-direction: column; align-items: center; }
+button { font: inherit; color: #bac9d5; border: 1px solid #354653; background: #1b2a37; border-radius: var(--fsc-radius); padding: 8px 12px; cursor: pointer; }
+button:hover { background: #293c49; color: #e6edf1; }
+button:focus-visible, input:focus-visible { outline: 2px solid #dce9df; outline-offset: 3px; }
+.preview-sizes { display: flex; gap: 5px; margin-bottom: 12px; }
+.preview-sizes button { font-size: 11px; padding: 4px 15px; background: transparent; border-color: transparent; }
+.preview-sizes [aria-pressed="true"] { background: #243341; border-color: #3b4d5b; color: #e7eef3; }
+.preview-device { width: 100%; max-width: 760px; height: min(76vh, 710px); min-height: 500px; border-radius: var(--fsc-radius); padding: 12px; border: 1px solid #3a4651; background: #09111b; box-shadow: 0 22px 60px #0005, inset 0 0 0 2px #151e28; }
+.preview-device[data-compact] { width: 420px; max-width: 100%; height: 560px; min-height: 0; }
+#app { width: 100%; height: 100%; overflow: hidden; border-radius: var(--fsc-radius); }
+.preview-caption { color: #8b9daa; font-size: 11px; text-align: center; margin: 14px 0 0; }
+.preview-tools { margin-top: 35px; background: #14202d; border: 1px solid #293b4a; border-radius: var(--fsc-radius); padding: 20px; }
+.preview-tools section + section { border-top: 1px solid #2c3c49; margin-top: 20px; padding-top: 18px; }
+.preview-tools h2 { font-size: 13px; font-weight: 600; margin: 0 0 6px; color: #d7e1e8; }
+.preview-tools p { color: #94a7b6; font-size: 11px; margin: 6px 0 16px; }
+.preview-presets { display: grid; gap: 7px; margin-top: 10px; }
+.preview-presets button { font-size: 12px; text-align: left; }
+.preview-slider { display: block; margin: 13px 0; font-size: 11px; }
+.preview-slider > span { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.preview-slider output { color: #9bacba; font-variant-numeric: tabular-nums; }
+.preview-range { position: relative; height: 21px; }
+.preview-range::after { content: ''; position: absolute; left: var(--target); height: 12px; width: 2px; top: 5px; background: #f1f0dd; pointer-events: none; }
+.preview-slider input { width: 100%; margin: 0; accent-color: #86b5d8; height: 21px; cursor: pointer; }
+.preview-align { width: 100%; font-size: 12px; margin-top: 6px; border-color: #526f86; color: #b8d2e6; background: #283e50; }
+.preview-align:disabled { opacity: .4; cursor: default; }
+.preview-key p { line-height: 1.7; }
+.preview-key i { display: inline-block; width: 9px; height: 9px; border-radius: var(--fsc-radius); margin-right: 4px; }
+.key-me { background: #86b5d8; }.key-mock { background: #d7a06c; margin-left: 18px; }
+[data-preview-status] { display: block; min-height: 32px; color: #afc3b8; font-size: 11px; }
+@media (max-width: 940px) { body { padding: 18px; } .preview-layout { grid-template-columns: minmax(0, 1fr) 236px; gap: 16px; } .preview-tools { padding: 14px; } }
+@media (max-width: 740px) { .preview-layout { grid-template-columns: 1fr; } .preview-tools { margin-top: 8px; width: 100%; max-width: 760px; } .preview-badge { white-space: normal; max-width: 160px; } h1 { font-size: 17px; } }

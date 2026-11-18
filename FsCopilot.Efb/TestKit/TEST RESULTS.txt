@@ -1,0 +1,63 @@
+FS Copilot 0.9.10 two-player test card
+
+LOCAL F1 - Assign Steering Force button. Valid press/release saves it;
+all control rows remain available. Force returns only Steering to Me.
+If assignment fails, capture its exact error; do not reset learning.
+Result / exact message:
+
+LOCAL M1 - Setup > Instrument sync monitor > Open monitor. Change heading,
+one altimeter and one light switch. Confirm named Covered changes and
+directions; search altimeter by name. Pause/Clear must not move controls.
+This tests local coverage/readout, not delivery to the other PC.
+Result / missing instruments:
+Fill this file on each PC; Collect test logs.cmd includes it in the diagnostic ZIP.
+
+This PC: HOST / FRIEND
+Local date/time and time zone:
+Aircraft/add-on version:
+PMS50 GTN750 version; Premium active on BOTH PCs: YES / NO
+Yoke/rudder/brake hardware (combined button or separate axes):
+Both PCs use this complete kit: YES / NO
+Check setup.cmd: PASS / FAIL
+All four wizard output groups passed on BOTH PCs: YES / NO
+Reset setup tested without simulator restart; connection/tolerance/binding kept: YES / NO / NOT RUN
+
+Use PASS / FAIL / NOT RUN for each case.
+P1 Idle shared connection:
+P2 Steering both directions, blocked non-owner rudder:
+P3 Throttle/RPM/Mixture independent Auto, no oscillation:
+P4 Steering Force, other owners unchanged:
+P5 Both independent barometers, COM frequency:
+P5a Battery OFF/ON from host, then friend:
+P5b NAV lights ON/OFF from host, then friend:
+P5c STROBE/TAXI lights ON/OFF from host, then friend:
+P6 Flaps direct UP/FULL and intermediate, both directions:
+P7 Resync requested from host and friend:
+P8 All three trims shared both ways, independently of Steering, no settled echo:
+A1 Shared heading bug both ways, no settled rotary feedback:
+A2 Shared indexed altitude both ways, independent barometers unchanged:
+A3 Shared AP mode/FD annunciators and VS UP/DN; note locally unavailable modes:
+A4 AP master ON/OFF both ways while parked; finish AP/FD OFF:
+T1 Low-speed taxi, combined brake button vs toe-brake axes:
+F1 Manual flight and aligned steering transfer:
+F2 Airborne gear/flaps selectors and actual positions:
+R1 Deliberate Leave and explicit local recovery:
+R2 Helper loss, no continuing remote inputs, recover/rejoin:
+R3 Restart, retained learning/output checks, rejoin:
+R4 Two-second pause on each PC, warning and same-session recovery:
+O1 Optional seat swap:
+O2 Optional hardware Force Steering with EFB closed:
+
+FIRST FAILURE (if any)
+Case:
+Exact local time:
+Host or friend initiated:
+Group and owner before failure (blue here/orange there):
+Hardware/button/knob moved:
+Expected:
+Actual:
+Exact EFB status/error on BOTH PCs:
+Was Auto waiting/transfer in progress:
+Parked/taxi/flight and AP state:
+Resync result counts and named issues (if used):
+Both diagnostic ZIP filenames:

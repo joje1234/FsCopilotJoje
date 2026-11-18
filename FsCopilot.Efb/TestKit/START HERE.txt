@@ -1,0 +1,287 @@
+FS COPILOT 0.9.10 - TWO-PLAYER TEST
+
+This kit contains the matching 0.9.10 helper, definitions and Community package.
+Update BOTH PCs completely; older helpers/packages are not matching versions.
+0.9.10 repairs the 0.9.9 startup regression: callback initialization no longer
+copies large diagnostic/input objects through temporary stack values. The
+compiled module_init frame drops from 78,160 to 34,528 bytes. A new WASM build
+check rejects frames of 64 KiB or more. Actual MSFS startup still needs testing.
+KEEP all saved learning/checks. No reset/Relearn or controller remapping is
+required for this fix. After restarting, confirm Waiting for bridge clears
+and hardware moves the EFB indicators before testing button assignment.
+0.9.10 contains the Force-button error-isolation fix and a read-only instrument
+monitor. Unsupported button candidates no longer end control discovery, and
+cleanup errors cannot generate more cleanup. Actual hardware assignment
+still needs simulator validation. Keep saved learning/checks; do not reset
+or press Relearn for this update. The user confirmed 0.9.8's Nosewheel fix
+and all four local output checks pass.
+LOCAL MONITOR: Setup > Instrument sync monitor > Open monitor. Turn one knob
+or switch at a time; Covered means its readable definition is configured for
+sharing. Both pilots / Host to copilot shows its direction. Search by name
+(e.g. heading or altimeter) for current coverage/readout. Pause/Clear activity
+only changes the display. Delivery cannot be proved without a second PC.
+GTN touches and controls without readable values are outside this monitor.
+The shared-control send target (~30Hz) and EFB display rate (10Hz) are unchanged.
+The inherited Setup > Reset setup can clear this aircraft's learned controls and
+saved output checks without restarting MSFS. Confirm Clear setup, then start
+Setup wizard. Connection settings, tolerance and Force-button binding are kept.
+Use it while parked, brake ON, AP OFF, all controls on Me and no shared session
+or active wizard. Engines may stay on for the reset, but must be OFF for the
+wizard. A disabled button shows its reason. It does not repair an SDK disconnect.
+Trims now use normal shared instrument synchronization. Either pilot can trim,
+regardless of Steering ownership. No trim learning, blocking or output-wizard
+steps. The tiller uses a standard event setter instead of direct SimVar output;
+the 0.9.6 error-20 batch did not identify its exact call. The local Nosewheel
+output check now passes in 0.9.8. New SDK errors include the control/call name.
+This build includes shared standard AP modes, FD, heading bug, altitude and VS selectors.
+Either pilot may adjust them; there is no AP owner to claim. The existing
+vanilla definitions/core carry these values, with corrected indexed setters.
+Both PCs need PMS50 GTN750 Premium activated for the supported GTN setup.
+GTN pages stay local. Guidance currently comes from the flight host's navigator;
+selecting the other pilot's GTN and automatic route copying are NOT enabled.
+Inherited Steering fixes declare the list before hardware is touched: yoke,
+rudder, tiller and both brakes. Only yoke roll/pitch and
+engine levers need hardware learning. The wizard never asks you to discover or
+align brakes, rudder or tiller. It checks those outputs automatically; trims
+are separate shared instruments and are not part of the output wizard.
+The left brake response is selected by verified cockpit output and saved; a
+later pedal event cannot switch it. Keep settings and valid engine checks.
+The expanded Steering routes need a one-time automatic output recheck.
+Inherited bounded session recovery: delayed data produces a warning after
+about 1 second (peer heartbeats after 3). An established session can recover
+within 8 seconds without another Join. Stale input/world packets are discarded;
+ownership transfers and writes wait for fresh data. Genuine loss, changed
+identity or an unconfirmed control operation can still end the session.
+Both the helper and Community module must be 0.9.10 for these deadlines to agree.
+This update restores the 11 existing vanilla B-variable mappings for battery,
+alternators, avionics and exterior lights. They were missing from the EFB
+ordinary-instrument catalog. Both PCs need this update for switch testing.
+Steering takeover now waits ONLY for yoke roll/pitch. Rudder and brakes transfer
+with Steering without matching. Keep saved learning; do not reset or Relearn.
+It does not add exclusive AP assignment or GTN route copying.
+Both GTN screens/pages stay local. Both separate altimeters are
+shared normally: either person can adjust either instrument.
+
+WHAT HAS BEEN CHECKED
+The previous 0.9.1 hover/menu UI and local button-brake wizard were confirmed
+in the simulator. This update has local definition, SDK-fake and relay checks;
+the friend's actual brake-axis wizard and the restored battery/light switches
+still need validation. The user reports the previous shared connection worked
+but battery/lights did not sync. This is NOT proof of a
+successful two-PC flight over your internet connection. That is the test below.
+
+ON BOTH PCs - INSTALL THE COMPLETE KIT
+1. Extract this ZIP into a NEW folder on the Desktop. Keep the folder intact.
+2. Completely exit MSFS. Close vanilla FsCopilot.exe and any old FsCopilot.Efb.exe.
+3. Open the SAME Community folder used for the previous FS Copilot EFB test.
+   Use ONE installation folder; do not install a second copy in Community2024
+   and Community. On the local user's PC the tested folder is Community2024.
+   Move the old installed fscopilot-controls-test folder to a rollback folder
+   OUTSIDE Community. Then select this kit's Community/fscopilot-controls-test
+   folder, press Ctrl+C, open the active simulator Community folder and press
+   Ctrl+V. Keep the original folder inside the kit; the checker verifies it too.
+   Move any old fscopilot-bridge package outside Community as well. Renaming an
+   old package while leaving it inside Community does NOT disable it.
+   Leave the simulator's WASM work folder and saved learning alone.
+4. Open THIS kit's Helper folder and run FsCopilot.Efb.exe ONCE. It runs in the
+   background; it has no desktop window. Do not run vanilla FsCopilot.exe.
+5. Run Check setup.cmd from the kit's top folder. It verifies the installed seven
+   Community files, the helper currently running, all definitions and old package
+   conflicts. Resolve any FAIL before joining. Its JSON report is saved in Reports.
+   If it finds multiple FS Copilot installs, move the extra installed copy to a
+   rollback folder outside BOTH Community folders with MSFS closed, then rerun.
+   If the active Community path cannot otherwise be located, run the script in
+   PowerShell with the active parent folder specified, for example:
+     & '.\Check setup.ps1' -CommunityPath 'D:\MSFS\Community'
+   Use your real folder, not that example path.
+6. Start MSFS into the SAME Black Square Baron 58P version on both PCs. Use the
+   same airport and parking area. Keep both simulators unpaused in the cockpit.
+   Engines OFF, AP OFF, parking brake ON. Power avionics for instrument tests.
+7. Open EFB > FS Copilot > Setup. Do NOT press Relearn. Run Setup wizard if any
+   output group is still needed; follow its hardware prompts. It controls Auto
+   pauses and group ownership itself. BOTH PCs must finish Steering, Throttle,
+   RPM and Mixture. Return all controls to Me afterward.
+8. Check Steering shows rudder, nosewheel and both brakes before touching them.
+   They use automatic simulator state, without learning. Trims are not listed
+   under Steering; they synchronize like the ordinary instruments instead.
+   Only roll/pitch and throttle/RPM/mixture may ask for two-position learning.
+   Parking brake stays ON for the wizard. If one of those alignment controls
+   remains unlearned, stop before joining and report its exact row/message.
+   To test from scratch intentionally, use Reset setup > Clear setup, then
+   Setup wizard. No simulator restart is required after pressing Reset setup.
+
+AFTER UPDATING BOTH PCs TO 0.9.10
+If Check setup.cmd verifies the installed files and the existing running helper,
+you can keep that matching installation/helper. Do not reset learning again.
+Keep your current saved learning and connection preferences. The wizard reuses
+valid saved groups and checks only missing/changed routes. Your friend's changed
+fixed Steering output routes require Steering again if not already checked in
+0.9.5; engine results are retained.
+During takeover, align only yoke roll/pitch. Pedals and brakes do not need to
+match cockpit positions. Pedals, brakes, tiller and trim need no manual discovery.
+
+CONFIGURE THE CONNECTION - DO NOT PRESS JOIN UNTIL BOTH ARE READY
+9. On each EFB open Setup > Shared cockpit. Leave Your code at its generated
+   eight-character value. Tell that code to your friend, and enter THEIR code in
+   Friend's code. Each person keeps their own code; do not use the same code.
+10. Select exactly these choices:
+      LOCAL USER: Host flight; Pilot - left.
+      FRIEND:     Join flight; Copilot - right.
+    Leave Server at the same setting on both: default p2p.fscopilot.com, port 3600.
+    Save connection on BOTH PCs. If you use a different configured relay, both
+    PCs must use that same server/port. This kit has not tested the public relay.
+11. Read back each other's codes and roles. Confirm both aircraft are stationary,
+    engines/AP OFF, parking brake ON, all groups on Me, and all four named output
+    checks passed. If Join shared session is disabled, report the exact EFB
+    status/Still needed names; do not guess or repeatedly reset learning.
+12. Press Join shared session on the host, then on the friend within 10 seconds.
+    Both must show the connected shared session. Wait 20 seconds without moving
+    controls. The guest may adopt the host's aircraft position; keep it parked.
+    If it ends, stop and collect logs on BOTH PCs before trying again.
+
+COLOURS ARE LOCAL TO EACH PERSON
+Blue = Me; orange = the other person. A group owned by the host must be blue on
+the host EFB and orange on the friend's. Ownership transfer reverses these colours.
+Two blue owners for the same group at the same time is a failure.
+
+PARKED TESTS - WRITE PASS/FAIL IN TEST RESULTS.txt
+P1. Connection: keep the joined session idle for one minute. Both stay connected.
+P2. Steering: host owns Steering. Move host roll/pitch/rudder; both cockpits follow.
+    The friend moves their yoke/rudder: actual aircraft controls must remain with
+    the host. Cockpit pedal animation alone is not proof; check the tail rudder.
+    The friend selects Me, clicks a yoke/pedal, then aligns. Steering transfers
+    only after alignment. Repeat in reverse. Steering has no automatic takeover.
+P3. Engine Auto: use Tolerance Tight on both. Host owns all three engine groups.
+    Host sets throttles about 50%, RPM about 75%, mixtures about 100%, then holds
+    hardware still. Friend moves BOTH throttles to match the live cockpit value.
+    Only Throttle transfers; RPM and Mixture stay with the host.
+    Friend now moves the owned throttles to about 70%; host leaves hardware at
+    50%. Host can move 20-30% without changing the live 70% demand. On moving
+    into the alignment band, the host takes back ONLY Throttle.
+    Repeat for RPM, then Mixture. Confirm both engine levers for each group follow.
+    An intentional hardware movement over 2% requests Auto; entering tolerance
+    completes it. A non-owner already near the live value may take over as soon
+    as they move. This is expected. Keep the other person's hardware still while
+    testing, then wait 15 seconds to check there is no ownership oscillation.
+P4. Force: with Steering owned by one person, the other opens its right-click or
+    press-and-hold menu and chooses Force takeover. Steering transfers immediately
+    without alignment. Other engine-group owners must stay unchanged. Return it.
+P5. Instruments: change ONLY the left barometer on the host, then on the friend.
+    It must reach the other PC without moving the right barometer. Repeat on the
+    right barometer from both PCs. Stop turning and watch 15 seconds: no shaking
+    or continued increments. Then, while still parked with engines OFF:
+    a. Host switches battery OFF, waits 2 seconds, then ON. Friend confirms BOTH
+       changes on the actual cockpit switch. Friend repeats; host confirms.
+    b. Leave battery ON. Host switches NAV lights ON/OFF, pausing 2 seconds at
+       each position. Friend confirms the cockpit switch; friend repeats.
+    c. Repeat with STROBE and TAXI lights, from each PC separately. Compare
+       switch positions as well as light output. Avionics can stay ON afterward.
+    d. Test COM frequency separately. If a switch fails, report its exact name,
+       who changed it, both positions, and whether Setup > Cockpit
+       synchronization reports a link. Do not repeatedly restart the wizard.
+P6. Flaps: host selects UP, then FULL directly; both show FULL. Test intermediate
+    then UP. Friend repeats. Compare the selected detent and actual flap travel;
+    allow normal transit time. Do not change gear while parked.
+P7. Resync: host presses Setup > Cockpit synchronization > Resync cockpit from
+    host. Keep knobs still. Wait for a terminal result on both EFBs; record checked,
+    corrected, pending, failed, unavailable and named issues. Repeat from friend.
+    Already matching instruments may show corrected=0. Optional unavailable
+    readings are reported separately; failed required items are a failure.
+    Ownership and local GTN pages must stay unchanged. Do not deliberately
+    disconnect to manufacture drift; if you notice real drift, record it and use
+    resync, then report whether it corrected that exact instrument.
+
+STANDARD AP AND SELECTORS - AFTER P1-P7, STILL PARKED
+A1. Engines OFF, parking brake ON, avionics powered and AP OFF on both PCs.
+    Host turns the heading bug to 170 degrees; friend checks the actual bug.
+    Friend turns it to 210 degrees; host checks. Stop for 15 seconds; neither
+    bug should keep moving or shake. No AP ownership menu is needed.
+A2. Host sets the altitude selector to 6000 ft; friend confirms. Friend sets
+    7000 ft; host confirms. Check both separate barometer settings are unchanged.
+A3. With AP OFF, try the FD, HDG, ALT, NAV, APR and BC buttons one at a time,
+    pausing three seconds between actions. Compare the actual annunciators.
+    Test from BOTH PCs. A mode that does not activate on the initiating PC
+    is not proof of a sync failure; report that exact local behavior separately.
+    Try UP/DN in VS mode and compare the selected VS if it is available while
+    parked. Pitch-mode UP/DN and custom arming/CWS/test behavior need separate
+    verification; do not infer them from the standard VS check.
+A4. While still parked, have the host engage AP briefly, confirm the actual AP
+    indication on the friend, then have the friend switch AP OFF. Repeat with
+    the friend engaging and the host disengaging. If AP will not engage locally,
+    record NOT RUN. Finish AP/FD OFF on both PCs. Steering/engine owners, seats
+    and both barometer settings must not change through AP control sharing.
+    These cases test state sharing, not remote GTN navigation guidance.
+
+P8. With AP OFF, adjust elevator, aileron and rudder trim a small amount on the
+    host and compare the corresponding indicators on the friend. Repeat from
+    the friend. Test with Steering owned by each person in turn: both may still
+    trim. No ownership/learning prompt should appear. Compare both barometers
+    afterward; their settings must stay unchanged. Stop adjustments and check
+    for 15 seconds that trim values settle without continued motion.
+
+TAXI - ONLY AFTER P1-P7 PASS
+T1. Engines running, AP OFF, very low taxi speed, parking brake OFF. With the host
+    owning Steering, test host's combined brake button and friend's non-owned
+    brake axes. Only the owner's brakes may affect the aircraft. Stop, transfer
+    Steering to the friend, and repeat: friend's toe brakes work; host's non-owned
+    brake button does not. Also test left/right braking if hardware supports it.
+    The parked test cannot prove wheel braking while parking brake is ON.
+
+AIRBORNE - ONLY AFTER PARKED/TAXI TESTS PASS
+F1. Fly manually with AP OFF. Transfer Steering with alignment in level flight.
+    The physics host remains the host even when the friend owns Steering.
+F2. At an appropriate safe gear/flap operating speed, host changes the gear
+    selector once. Compare both selectors and actual gear after normal transit.
+    Friend repeats. Repeat flap detents in both directions. Report selector vs
+    physical-position differences separately. Historical gear failure is not yet
+    diagnosed; there is no new gear-runtime special case in this build.
+
+RECOVERY - TEST PARKED, AFTER RETURNING FROM FLIGHT
+R1. Park, engines/AP OFF and parking brake ON. Each participant uses Leave shared
+    session. Confirm it ends on both sides. Recover Steering, Throttle, RPM and
+    Mixture to Me on EACH PC, one at a time, using alignment or that control's
+    Force menu. Do not assume leaving automatically reconnects local hardware.
+R2. Join again while parked. Have the friend close ONLY their EFB helper, leaving
+    MSFS running. The host must report an ended session; old remote inputs must
+    not continue. On both PCs explicitly recover each group to Me as in R1.
+    If physics/input recovery cannot be confirmed, stop and report the exact
+    message; do not repeatedly override it. Restart the friend's matching helper,
+    then join again only after both pilots confirm local recovery.
+R3. Leave/recover normally, close and reopen MSFS. Saved learning/output checks
+    should remain. Do not press Relearn. Move controls once, check the saved
+    setup, rejoin, and verify an initial host baseline on the friend again.
+R4. Short pause recovery, while parked: with a shared session active, the host
+    opens the MSFS pause menu for about TWO seconds, then returns to the cockpit.
+    The friend watches for an "Updates delayed" notice. The session should
+    remain joined with the same owners and resume fresh updates automatically.
+    Repeat with the friend pausing. Do not press Join or reset learning.
+    Some pause modes keep updates running; no warning in that case is normal.
+    A longer interruption reaching 8 seconds, an actual simulator/helper exit
+    or loss of ownership proof still requires a fresh Join and local recovery.
+    Report whether it warned, recovered, or ended, with the exact log time.
+
+OPTIONAL AFTER THE MAIN TESTS
+O1. Parked seat swap: request Swap seats, have the other person accept, then check
+    the views/seat labels. It must not move physics hosting or reassign controls.
+O2. Hardware Force Steering button: assign a dedicated button in Setup > Steering.
+    Close the tablet; a press must take ONLY Steering. Holding must not repeat.
+    After reload/replug, press/release once to arm; subsequent presses force.
+
+IF ANY CASE FAILS
+The helper log now includes INF, WRN and ERR levels. "Shared recovery" WRN
+records a recoverable gap; INF records its recovery. "Shared ended/stopped"
+ERR records a terminal reason. Do not treat an isolated instrument-write error
+as proof that the whole physical-control session ended.
+Stop at that case and note the exact EFB message and local time on both PCs.
+Fill TEST RESULTS.txt: case number, who owned the control, who moved what,
+expected/actual result, and whether it was parked/taxi/flight.
+On BOTH PCs run Collect test logs.cmd. It includes recent helper/native logs,
+the local setup reports, kit identity and your test card in a ZIP under Reports.
+Send BOTH ZIPs. It does not upload anything, change simulator settings, or copy
+saved calibration/connection .bin files. Do not delete settings or retry many
+times before collecting the first failure.
+
+Known scope: shared standard AP modes/selectors, without an AP commander.
+No synchronized GTN finger presses, automatic route copying or selectable
+remote GTN guidance. PMS50 GTN750 Premium is required on both PCs for the
+supported GTN setup. NAV/APR guidance currently comes from the flight host.

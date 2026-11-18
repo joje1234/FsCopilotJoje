@@ -27,12 +27,12 @@ public:
 
     bool request(const command& cmd)
     {
-        if (!ready || applying || cmd.operation == action::read) return false;
+        if (!ready || applying || (cmd.operation != action::set && cmd.operation != action::restore && cmd.operation != action::force)) return false;
         bool steering = steering_blocked;
         bool quadrant = quadrant_blocked;
         if (cmd.operation == action::restore) steering = quadrant = false;
-        else if (cmd.target == group::steering) steering = cmd.blocked;
-        else quadrant = cmd.blocked;
+        else if (cmd.target == group::steering) steering = cmd.operation == action::force ? false : cmd.blocked;
+        else quadrant = cmd.operation == action::force ? false : cmd.blocked;
         return begin(cmd, steering, quadrant);
     }
 

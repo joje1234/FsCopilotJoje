@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>FsCopilot.Efb</AssemblyName>
+    <Version>0.9.10</Version>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ApplicationIcon>../FsCopilot/Assets/fscopilot.ico</ApplicationIcon>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../FsCopilot.Definitions/FsCopilot.Definitions.csproj" />
+    <ProjectReference Include="../FsCopilot.Native.Windows/FsCopilot.Native.Windows.csproj" />
+    <ProjectReference Include="../FsCopilot.Ownership/FsCopilot.Ownership.csproj" />
+    <ProjectReference Include="../FsCopilot.Transport/FsCopilot.Transport.csproj" />
+    <Reference Include="Microsoft.FlightSimulator.SimConnect">
+      <HintPath>../FsCopilot/Microsoft.FlightSimulator.SimConnect.dll</HintPath>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Reference>
+    <PackageReference Include="LiteNetLib" Version="1.3.1" />
+    <PackageReference Include="Open.Nat.V2" Version="3.1.1" />
+    <PackageReference Include="Serilog" Version="4.3.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="System.Reactive" Version="6.1.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../FsCopilot/Network/*.cs" Link="Network/%(Filename)%(Extension)" />
+    <Compile Include="../FsCopilot/Simulation/SharedBackendRunner.cs" Link="SharedBackendRunner.cs" />
+    <Content Include="../Definitions/**/*.yaml" Link="Definitions/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../Definitions/controls/*.json" Link="Definitions/controls/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../Definitions/cockpit/*.json" Link="Definitions/cockpit/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Collect logs.cmd" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Same compiled vanilla implementation used by desktop and EFB helper. -->
+    <ProjectReference Include="../FsCopilot.Definitions/FsCopilot.Definitions.csproj" />
+    <Content Include="../Definitions/**/*.yaml" Link="Definitions/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../Definitions/controls/*.json" Link="Definitions/controls/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../Definitions/cockpit/*.json" Link="Definitions/cockpit/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Fixtures/original-baron.yaml" Link="Original/baron.yaml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

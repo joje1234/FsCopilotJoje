@@ -1,0 +1,47 @@
+{
+    "version":  1,
+    "sharedAutopilot":  true,
+    "tolerances":  {
+                       "A:AUTOPILOT HEADING LOCK DIR:1":  0.022,
+                       "A:AILERON TRIM PCT":  0.00004,
+                       "A:ELEVATOR TRIM PCT":  0.51,
+                       "A:RUDDER TRIM PCT":  0.0032
+                   },
+    "required":  [
+                     "A:KOHLSMAN SETTING MB EX1:1",
+                     "A:KOHLSMAN SETTING MB EX1:2"
+                 ],
+    "retrySafe":  [
+                      "A:KOHLSMAN SETTING MB EX1:1",
+                      "A:KOHLSMAN SETTING MB EX1:2",
+                      "A:FLAPS HANDLE INDEX",
+                      "L:LANDING_GEAR_Gear",
+                      "A:AILERON TRIM PCT",
+                      "A:ELEVATOR TRIM PCT",
+                      "A:RUDDER TRIM PCT"
+                  ],
+    "labels":  {
+                   "A:KOHLSMAN SETTING MB EX1:1":  "Left altimeter",
+                   "A:KOHLSMAN SETTING MB EX1:2":  "Right altimeter",
+                   "A:FLAPS HANDLE INDEX":  "Flaps",
+                   "L:LANDING_GEAR_Gear":  "Landing gear",
+                   "A:AILERON TRIM PCT":  "Aileron trim",
+                   "A:ELEVATOR TRIM PCT":  "Elevator trim",
+                   "A:RUDDER TRIM PCT":  "Rudder trim"
+               },
+    "excludeModules":  [
+                           "modules/PMS50_GTN_650-750_no_baro.yaml",
+                           "modules/AS_GNS430.yaml",
+                           "modules/AS_GNS530.yaml"
+                       ],
+    "exclude":  [
+                    "L:var_PilotCws",
+                    "L:var_PilotCws_IsDown",
+                    "L:var_CopilotCws",
+                    "L:var_CopilotCws_IsDown",
+                    "L:var_AutopilotTest",
+                    "L:var_rnavDrivesHsi",
+                    "A:CIRCUIT CONNECTION ON:6"
+                ],
+    "reason":  "Both pilots share AP selectors and modes through the vanilla state setters. No AP ownership restriction. GTN/GNS displays and navigation remain local; GTN guidance selection is separate and pending. CWS/test controls are not verified. Circuit 6 has two conflicting vanilla bus setters and is withheld pending a verified indexed mapping."
+}

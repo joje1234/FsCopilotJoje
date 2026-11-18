@@ -1,0 +1,9 @@
+# Standard MSFS surface route, matching vanilla FsCopilot.Bridge.Wasm's
+# apply_surfaces implementation. The event's sign is opposite the read SimVar.
+master:
+  - get: A:RUDDER POSITION, Position 16k
+    set: "`${-value} (>K:AXIS_RUDDER_SET)`"
+  # The axis event has the opposite sign to STEER INPUT CONTROL, like rudder.
+  # MSFS readback: +328 event units -> -0.0200195, not +0.0200195.
+  - get: A:STEER INPUT CONTROL, Percent over 100
+    set: "`${-value * 16384} (>K:AXIS_STEERING_SET)`"

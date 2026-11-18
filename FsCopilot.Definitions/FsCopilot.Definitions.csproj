@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- One implementation, retained at its vanilla source path for review. -->
+    <Compile Include="../FsCopilot/Simulation/Definitions.cs" Link="Definitions.cs" />
+    <Using Include="Serilog" />
+    <PackageReference Include="Jint" Version="4.4.1" />
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
+    <PackageReference Include="Serilog" Version="4.3.0" />
+  </ItemGroup>
+</Project>

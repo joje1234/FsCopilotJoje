@@ -1,4 +1,4 @@
-﻿namespace FsCopilot;
+namespace FsCopilot;
 
 using System.Globalization;
 using System.Reflection;
@@ -19,7 +19,7 @@ sealed class Program
     {
         CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
         CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
-        
+
         var isDev = args.Any(a => string.Equals(a, "--dev", StringComparison.OrdinalIgnoreCase));
         var isDebug = args.Any(a => string.Equals(a, "--debug", StringComparison.OrdinalIgnoreCase));
         var version = Assembly.GetEntryAssembly()?
@@ -45,11 +45,19 @@ sealed class Program
         try
         {
             Log.Information("[Application] Loaded {Version} version", version);
-            BuildAvaloniaApp(args).StartWithClassicDesktopLifetime(args);
+            var companion = EfbCompanionOptions.Parse(args);
+            var backend = companion is null ? SharedBackendOptions.Parse(args) : null;
+            if (companion is not null || backend is not null) {
+                if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("The EFB SimConnect backend requires Windows.");
+                if (companion is not null) SharedBackendRunner.RunFromEfb(companion).GetAwaiter().GetResult();
+                else SharedBackendRunner.Run(backend!).GetAwaiter().GetResult();
+            }
+            else BuildAvaloniaApp(args).StartWithClassicDesktopLifetime(args);
         }
         catch (Exception ex)
         {
             Log.Error(ex, "[Application] Something went wrong");
+            Environment.ExitCode = 1;
         }
         finally
         {
@@ -75,7 +83,7 @@ sealed class Program
                     services.AddSingleton(new SimClient(!isDev ? "FS Copilot" : "FS Copilot DEV"));
                     services.AddSingleton<SetupViewModel>();
                     services.AddSingleton(new Updater("http://p2p.fscopilot.com:2320"));
-                    
+
                     if (!isDev)
                     {
                         services.AddSingleton<INetwork>(new HybridNetwork("p2p.fscopilot.com", peerId, name));

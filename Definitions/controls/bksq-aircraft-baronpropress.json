@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "aircraft": "bksq-aircraft-baronpropress",
+  "engines": 2,
+  "axes": [
+    { "axis": "rudder", "definition": "A:RUDDER POSITION", "minimum": -16384, "maximum": 16384 },
+    { "axis": "steering", "definition": "A:STEER INPUT CONTROL", "minimum": -1, "maximum": 1, "cockpitReference": true },
+    { "axis": "leftBrake", "definition": "A:BRAKE LEFT POSITION EX1", "minimum": 0, "maximum": 32768, "cockpitReference": true, "axisInputResponse": [0, 0.08, 0.27, 0.53, 1] },
+    { "axis": "rightBrake", "definition": "A:BRAKE RIGHT POSITION EX1", "minimum": 0, "maximum": 32768, "cockpitReference": true, "outputBreakpoints": [0, 0.08, 0.27, 0.53, 1] },
+    { "axis": "throttle1", "definition": "A:GENERAL ENG THROTTLE LEVER POSITION:1", "minimum": 0, "maximum": 16384 },
+    { "axis": "propeller1", "definition": "A:GENERAL ENG PROPELLER LEVER POSITION:1", "minimum": 0, "maximum": 16384 },
+    { "axis": "mixture1", "definition": "L:BKSQ_MixtureLeverPosition_1", "minimum": 0, "maximum": 100, "cockpitReference": true },
+    { "axis": "throttle2", "definition": "A:GENERAL ENG THROTTLE LEVER POSITION:2", "minimum": 0, "maximum": 16384 },
+    { "axis": "propeller2", "definition": "A:GENERAL ENG PROPELLER LEVER POSITION:2", "minimum": 0, "maximum": 16384 },
+    { "axis": "mixture2", "definition": "L:BKSQ_MixtureLeverPosition_2", "minimum": 0, "maximum": 100, "cockpitReference": true }
+  ]
+}

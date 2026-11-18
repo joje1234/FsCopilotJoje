@@ -10,7 +10,7 @@ using LiteNetLib;
 internal interface IPacketCodecAdapter
 {
     void Encode(object packet, BinaryWriter bw);
-    object Decode(BinaryReader br);
+    object? Decode(BinaryReader br);
 }
 
 internal sealed class Codecs
@@ -68,20 +68,7 @@ internal sealed class Codecs
         {
             reader.GetBytes(buffer, length);
 
-            using var ms = new MemoryStream(buffer, 0, length, writable: false, publiclyVisible: true);
-            using var br = new BinaryReader(ms, Encoding.UTF8, true);
-
-            var packetType = br.ReadByte();
-            if (!TryGet(packetType, out var codec)) return null;
-
-            try
-            {
-                return codec.Decode(br);
-            }
-            catch (Exception)
-            {
-                return null;
-            }
+            return Decode(buffer, 0, length);
         }
         finally
         {
@@ -90,10 +77,24 @@ internal sealed class Codecs
         }
     }
 
+    public object? Decode(byte[] data, int offset, int length)
+    {
+        if (length <= 0) return null;
+        try
+        {
+            using var ms = new MemoryStream(data, offset, length, writable: false, publiclyVisible: true);
+            using var br = new BinaryReader(ms, Encoding.UTF8, true);
+            if (!TryGet(br.ReadByte(), out var codec)) return null;
+            var packet = codec.Decode(br);
+            return ms.Position == ms.Length ? packet : null;
+        }
+        catch (Exception) { return null; }
+    }
+
     private sealed class CodecAdapter<T>(IPacketCodec<T> inner) : IPacketCodecAdapter
     {
         public void Encode(object packet, BinaryWriter bw) => inner.Encode((T)packet, bw);
-        public object Decode(BinaryReader br) => inner.Decode(br);
+        public object? Decode(BinaryReader br) => inner.Decode(br);
     }
     
     private static string SchemaFor<T>() => SchemaFor(typeof(T));
@@ -154,7 +155,7 @@ internal sealed class Codecs
             var map = allProps.ToDictionary(p => p.Name, p => p, StringComparer.OrdinalIgnoreCase);
             var ordered = ctor.GetParameters()
                 .Select(p => map.TryGetValue(p.Name!, out var pi) ? pi : null)
-                .Where(pi => pi != null)!
+                .OfType<PropertyInfo>()
                 .ToList();
 
             // Append any leftover properties deterministically

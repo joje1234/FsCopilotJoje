@@ -1,5 +1,3 @@
-using Avalonia.Platform;
-
 namespace FsCopilot.Simulation;
 
 using System.Collections;
@@ -216,6 +214,7 @@ public partial class Definition
     private static partial Regex SetRegex();
     
     private readonly string? _set;
+    public string? Setter => _set;
     public bool Shared { get; init; }
     public string Get { get; init; }
     public string Units { get; init; }
@@ -266,6 +265,12 @@ public partial class Definition
     public string ParseSet(object value, object current, out string sUnits, out object[] values)
     {
         var exp = Set(value, current);
+        if (string.IsNullOrWhiteSpace(exp))
+        {
+            sUnits = Units;
+            values = [];
+            return Get;
+        }
 
         var m = SetRegex().Match(exp);
         if (!m.Success)

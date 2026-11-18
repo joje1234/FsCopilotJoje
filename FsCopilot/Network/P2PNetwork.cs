@@ -16,7 +16,7 @@ public sealed class P2PNetwork : INetwork, IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly EventBasedNatPunchListener _natListener = new();
     private readonly EventBasedNetListener _netListener = new();
-    private readonly ConcurrentDictionary<Type, object> _streams = new();
+    private readonly PacketInbox _inbox = new();
     private readonly Subject<Unit> _publish = new();
     private readonly Codecs _codecs = new Codecs()
             .Add<PeerTags, PeerTags.Codec>();
@@ -87,11 +87,7 @@ public sealed class P2PNetwork : INetwork, IDisposable
         _net.Stop();
         _publish.OnCompleted();
 
-        foreach (var subj in _streams.Values)
-        {
-            var mi = subj.GetType().GetMethod("OnCompleted");
-            mi?.Invoke(subj, null);
-        }
+        _inbox.Dispose();
     }
 
     private async Task Start(CancellationToken ct)
@@ -264,9 +260,7 @@ public sealed class P2PNetwork : INetwork, IDisposable
             return;
         }
 
-        if (!_streams.TryGetValue(packet.GetType(), out var subjObj)) return;
-        var onNextMethod = subjObj.GetType().GetMethod("OnNext");
-        onNextMethod!.Invoke(subjObj, [packet]);
+        _inbox.Publish(peer.Tag as string, Peer.TransportKind.Direct, packet);
     }
     
     private void OnUnconnected(IPEndPoint remote, NetPacketReader reader, UnconnectedMessageType type)
@@ -366,9 +360,9 @@ public sealed class P2PNetwork : INetwork, IDisposable
         _net.SendToAll(data, method);
     }
 
-    public IObservable<TPacket> Stream<TPacket>() =>
-        ((IObservable<TPacket>)_streams.GetOrAdd(typeof(TPacket), _ => new Subject<TPacket>()))
-        .ObserveOn(TaskPoolScheduler.Default);
+    public IObservable<TPacket> Stream<TPacket>() => _inbox.Stream<TPacket>();
+
+    public IObservable<ReceivedPacket<TPacket>> StreamWithSource<TPacket>() => _inbox.StreamWithSource<TPacket>();
 
     public void RegisterPacket<TPacket, TCodec>()
         where TPacket : notnull

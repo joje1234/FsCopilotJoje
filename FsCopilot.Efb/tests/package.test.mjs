@@ -34,7 +34,7 @@ result = run('--wasm', wasm);
 assert.equal(result.status, 0, result.stderr);
 const layout = JSON.parse(readFileSync(join(output, 'layout.json'), 'utf8'));
 const manifest = JSON.parse(readFileSync(join(output, 'manifest.json'), 'utf8'));
-assert.equal(manifest.package_version, '0.1.0');
+assert.equal(manifest.package_version, '0.9.10');
 const paths = layout.content.map(item => item.path);
 for (const path of ['html_ui/efb_ui/efb_apps/FsCopilotControls/FsCopilotControls.js',
     'html_ui/efb_ui/efb_apps/FsCopilotControls/Assets/icon.svg', 'modules/FsCopilotControls.wasm', 'THIRD_PARTY_NOTICES.txt', 'LICENSE.txt', 'manifest.json']) {

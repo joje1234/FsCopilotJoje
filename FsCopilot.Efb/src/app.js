@@ -24,14 +24,14 @@
             render() {
                 return sdk.FSComponent.buildComponent('div', {
                     ref: this.element,
-                    style: 'position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;'
+                    style: 'position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;box-sizing:border-box;padding:24px 0 56px;'
                 });
             }
             onAfterRender() {
                 this.unmount = root.FscControls.mount(this.element.instance, controller);
             }
-            onOpen() { controller.tick(); }
-            onResume() { controller.tick(); }
+            onOpen() { controller.start(); controller.tick(); }
+            onResume() { controller.start(); controller.tick(); }
             onPause() {}
             onClose() {}
             onUpdate() {}
@@ -61,7 +61,7 @@
             get unitsSettingsManager() { return this._unitsSettingsManager; }
             getIsSearchable() { return true; }
             getIsFavoritable() { return true; }
-            getVersion() { return '0.1.0'; }
+            getVersion() { return '0.9.10'; }
             async _install(props) {
                 this.bus = props.bus;
                 this._unitsSettingsManager = props.unitsSettingManager;
@@ -76,7 +76,10 @@
                 }
                 if (!controller) {
                     controller = new root.FscControls.Controller(root.FscControls.createCommBusTransport());
-                    controller.start();
+                    controller.configureRouteInspector(new root.FscControls.RouteInspector(root,{
+                        report: canonical => controller.transport.reportNavigation(canonical),
+                        reportError: diagnostic => controller.transport.reportNavigation(diagnostic)
+                    }));
                 }
                 this._isReady = true;
                 if (root.Coherent && typeof root.Coherent.trigger === 'function')

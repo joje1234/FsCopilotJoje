@@ -15,10 +15,11 @@ using System.Threading.Tasks;
 using LiteNetLib;
 using LiteNetLib.Utils;
 using Serilog;
+using FsCopilot.Transport;
 
 public sealed class RelayNetwork : INetwork, IDisposable
 {
-    private const int RelayPort = 3600;
+    private readonly int _relayPort;
     private const byte ControlChannel = 0;
     private const byte DataChannel = 1;
 
@@ -38,7 +39,8 @@ public sealed class RelayNetwork : INetwork, IDisposable
 
     private readonly Subject<Unit> _publish = new();
     private readonly ConcurrentDictionary<string, Peer> _peers = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<Type, object> _streams = new();
+    private readonly PacketInbox _inbox = new();
+    private readonly BehaviorSubject<bool> _originAvailable = new(false);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<ConnectionResult>> _connectWaiters = new(StringComparer.Ordinal);
 
     private readonly Codecs _codecs = new Codecs()
@@ -50,13 +52,15 @@ public sealed class RelayNetwork : INetwork, IDisposable
     private volatile NetPeer? _relayPeer;
 
     public IObservable<ICollection<Peer>> Peers { get; }
+    public IObservable<bool> OriginAvailable => _originAvailable.DistinctUntilChanged();
 
-    public RelayNetwork(string host, string peerId, string name, bool autoConnect = true)
+    public RelayNetwork(string host, string peerId, string name, bool autoConnect = true, int relayPort = 3600)
     {
         _host = host;
         _peerId = peerId;
         _selfName = name;
         _autoConnect = autoConnect;
+        _relayPort = relayPort;
 
         _net = new(_listener)
         {
@@ -64,7 +68,7 @@ public sealed class RelayNetwork : INetwork, IDisposable
             UnconnectedMessagesEnabled = false,
             NatPunchEnabled = false,
             DisconnectTimeout = 15000,
-            ChannelsCount = 2
+            ChannelsCount = 3
         };
 
         // Client should not accept inbound connections
@@ -101,11 +105,8 @@ public sealed class RelayNetwork : INetwork, IDisposable
 
         _publish.OnCompleted();
 
-        foreach (var subj in _streams.Values)
-        {
-            var mi = subj.GetType().GetMethod("OnCompleted");
-            mi?.Invoke(subj, null);
-        }
+        _inbox.Dispose();
+        _originAvailable.OnCompleted();
 
         foreach (var kv in _connectWaiters)
             kv.Value.TrySetResult(ConnectionResult.Failed);
@@ -222,9 +223,9 @@ public sealed class RelayNetwork : INetwork, IDisposable
         where TCodec : IPacketCodec<TPacket>, new() =>
         _codecs.Add<TPacket, TCodec>();
 
-    public IObservable<TPacket> Stream<TPacket>() =>
-        ((IObservable<TPacket>)_streams.GetOrAdd(typeof(TPacket), _ => new Subject<TPacket>()))
-        .ObserveOn(TaskPoolScheduler.Default);
+    public IObservable<TPacket> Stream<TPacket>() => _inbox.Stream<TPacket>();
+
+    public IObservable<ReceivedPacket<TPacket>> StreamWithSource<TPacket>() => _inbox.StreamWithSource<TPacket>();
 
     private async Task EnsureRelayConnected(CancellationToken ct)
     {
@@ -236,7 +237,7 @@ public sealed class RelayNetwork : INetwork, IDisposable
         if (_relayEndpoint is null)
             throw new InvalidOperationException("Relay endpoint resolution failed");
 
-        var token = $"pid={_peerId};schema={_codecs.Schema}";
+        var token = $"pid={_peerId};schema={_codecs.Schema};origin=1";
 
         _net.Connect(_relayEndpoint, token);
 
@@ -262,7 +263,7 @@ public sealed class RelayNetwork : INetwork, IDisposable
         {
             var ips = await Dns.GetHostAddressesAsync(_host, ct).ConfigureAwait(false);
             var ip = ips.FirstOrDefault(x => x.AddressFamily is AddressFamily.InterNetworkV6 or AddressFamily.InterNetwork);
-            return ip is null ? null : new IPEndPoint(ip, RelayPort);
+            return ip is null ? null : new IPEndPoint(ip, _relayPort);
         }
         catch (Exception e)
         {
@@ -274,12 +275,14 @@ public sealed class RelayNetwork : INetwork, IDisposable
     private void OnRelayConnected(NetPeer peer)
     {
         _relayPeer = peer;
+        _originAvailable.OnNext(false);
         Log.Debug("[Relay] CON RELAY -> {Address}", new IPEndPoint(peer.Address, peer.Port));
     }
 
     private void OnRelayDisconnected(NetPeer peer, DisconnectInfo info)
     {
         _relayPeer = null;
+        _originAvailable.OnNext(false);
         // Links are implicitly gone when relay connection is gone
         _peers.Clear();
         _publish.OnNext(Unit.Default);
@@ -307,6 +310,7 @@ public sealed class RelayNetwork : INetwork, IDisposable
         // server -> client
         LinkReady = 10,
         LinkClosed = 11,
+        Capabilities = 12,
 
         Error = 255
     }
@@ -341,47 +345,61 @@ public sealed class RelayNetwork : INetwork, IDisposable
 
     private void OnReceive(NetPeer peer, NetPacketReader reader, byte channel, DeliveryMethod method)
     {
-        if (channel == ControlChannel)
+        try
         {
-            if (reader.AvailableBytes < 1) return;
-
-            var type = (ControlType)reader.GetByte();
-            switch (type)
+            if (!ReferenceEquals(peer, _relayPeer)) return;
+            if (channel == ControlChannel)
             {
-                case ControlType.LinkReady:
+                if (reader.AvailableBytes < 1) return;
+
+                var type = (ControlType)reader.GetByte();
+                switch (type)
                 {
-                    var otherId = reader.GetString();
-                    OnLinkReady(otherId);
-                    break;
-                }
-                case ControlType.LinkClosed:
-                {
-                    var otherId = reader.GetString();
-                    var code = reader.GetString();
-                    var msg = reader.GetString();
-                    OnLinkClosed(otherId, code, msg);
-                    break;
-                }
-                case ControlType.Error:
-                {
-                    var otherId = reader.GetString();
-                    var code = reader.GetString();
-                    var msg = reader.GetString();
-                    OnError(otherId, code, msg);
-                    break;
+                    case ControlType.LinkReady:
+                    {
+                        var otherId = reader.GetString();
+                        OnLinkReady(otherId);
+                        break;
+                    }
+                    case ControlType.LinkClosed:
+                    {
+                        var otherId = reader.GetString();
+                        var code = reader.GetString();
+                        var msg = reader.GetString();
+                        OnLinkClosed(otherId, code, msg);
+                        break;
+                    }
+                    case ControlType.Error:
+                    {
+                        var otherId = reader.GetString();
+                        var code = reader.GetString();
+                        var msg = reader.GetString();
+                        OnError(otherId, code, msg);
+                        break;
+                    }
+                    case ControlType.Capabilities:
+                        _originAvailable.OnNext(reader.AvailableBytes == 1 && reader.GetByte() == 1);
+                        break;
                 }
             }
+            else if (channel == DataChannel || channel == RelayOriginFrame.Channel)
+            {
+                var length = reader.AvailableBytes;
+                if (length <= 0 || channel == RelayOriginFrame.Channel && length > RelayOriginFrame.MaxPayload + 69) return;
+                var payload = new byte[length];
+                reader.GetBytes(payload, length);
+                string? origin = null;
+                if (channel == RelayOriginFrame.Channel)
+                {
+                    if (!RelayOriginFrame.TryDecode(payload, out var sender, out payload) || sender == _peerId || !_peers.ContainsKey(sender)) return;
+                    origin = sender;
+                }
+                var obj = _codecs.Decode(payload, 0, payload.Length);
+                if (obj is null) return;
+                _inbox.Publish(origin, Peer.TransportKind.Relay, obj);
+            }
         }
-        else if (channel == DataChannel)
-        {
-            var obj = _codecs.Decode(reader);
-            if (obj is null) return;
-
-            if (!_streams.TryGetValue(obj.GetType(), out var subjObj)) return;
-
-            var onNextMethod = subjObj.GetType().GetMethod("OnNext");
-            onNextMethod!.Invoke(subjObj, [obj]);
-        }
+        finally { reader.Recycle(); }
     }
 
     private void OnLinkReady(string otherPeerId)

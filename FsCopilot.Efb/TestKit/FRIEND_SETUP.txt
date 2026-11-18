@@ -1,0 +1,88 @@
+FS COPILOT EFB 0.9.10 - FRIEND SETUP
+
+Use fscopilot-0.9.10-two-player-test.zip. This is the matching test version
+installed on my PC, not the finished v1 release. Keep your saved learning.
+
+1. CLOSE THE OLD PROGRAMS
+   Fully close MSFS. Close vanilla FsCopilot.exe.
+   Open Task Manager > Details. End any old FsCopilot.Efb.exe process.
+   You can keep vanilla FS Copilot installed; leave it closed for these tests.
+
+2. EXTRACT THE ZIP
+   Extract it into a NEW folder, e.g. Desktop\FsCopilot-0.9.10.
+   Do not run files from inside the ZIP. Keep the extracted folder intact.
+   Its top level contains Community, Helper, Check setup.cmd and START HERE.txt.
+
+3. UPDATE THE COMMUNITY PACKAGE WHILE MSFS IS CLOSED
+   Open the active Community folder used for your previous EFB test.
+   Move the OLD fscopilot-controls-test folder to a backup folder OUTSIDE Community.
+   Move any old fscopilot-bridge package outside Community too.
+   Copy this kit's Community\fscopilot-controls-test folder INTO that active
+   Community folder. COPY it: keep the source folder inside the extracted kit.
+   Install only one copy; do not leave another in Community or Community2024.
+   Renaming an old package while leaving it inside Community does not disable it.
+   Leave the simulator's WASM work folder and saved settings untouched.
+
+4. START THE MATCHING HELPER
+   Open the extracted kit's Helper folder and run FsCopilot.Efb.exe ONCE.
+   It runs in the background and has no desktop window.
+   Keep the Definitions folder beside it. Do not start the vanilla application.
+
+5. CHECK THE FILES
+   Run Check setup.cmd from the extracted kit's top folder.
+   It must report PASS for kit files, installed package and running helper.
+   If it reports FAIL, send me the exact output before continuing.
+   If it reports multiple installations, resolve the duplicate with MSFS closed.
+
+6. LOAD THE BARON
+   Start MSFS with the same Black Square Baron 58P version as me, at the same
+   airport/parking area. Stay unpaused in the cockpit with engines OFF,
+   autopilot OFF and parking brake ON. Power avionics for instrument checks.
+   PMS50 GTN750 Premium must be activated on both PCs.
+
+7. CHECK LOCAL CONTROLS FIRST
+   Open EFB > FS Copilot. Waiting for bridge should clear and moving your
+   hardware should move the EFB yoke/quadrant indicators.
+   If it stays Waiting for bridge or says Waiting for simulator, STOP and use
+   step 10. Do not reset or press Relearn to try to fix a connection failure.
+
+8. FINISH ONLY THE MISSING WIZARD CHECKS
+   Open Setup. Keep saved learning; do not press Reset setup or Relearn.
+   If any output groups are listed as Still needed, press Setup wizard and
+   follow its prompts. It handles ownership and Auto itself. Keep hardware
+   still during the automatic output check.
+   Steering, Throttle, RPM and Mixture must all pass before joining.
+   If they are already saved/passed, do not repeat them.
+   Return all controls to Me afterward. Rudder/brakes/tiller need no manual
+   learning or alignment. Trims are shared instruments, outside Steering.
+   If a check fails, stop and send its exact group, axis and message.
+
+9. CONFIGURE THE FRIEND'S CONNECTION
+   In Setup > Shared cockpit, select Join flight and Copilot - right.
+   Set Server to p2p.fscopilot.com and Port to 3600 on BOTH PCs.
+   Keep your own Your code and send it to me. I will give you my code:
+   put MY code into Friend's code. I put YOUR code into Friend's code here.
+   Our Your code values must be different, eight lowercase letters/digits each.
+   Press Save connection. On my PC I select Host flight and Pilot - left.
+   Wait until we both confirm the four output checks passed and both aircraft
+   are parked, engines/AP OFF, brake ON, all controls on Me.
+   Then BOTH of us press Join shared session once and begin parked tests.
+   If Join is disabled, send the exact status and Still needed names.
+
+10. IF ANYTHING FAILS
+   Note the local time, what you pressed/moved, and the exact EFB error.
+   Run Collect test logs.cmd from the kit's top folder.
+   Send me the diagnostic ZIP it reports, plus the error text/screenshot.
+   The collector saves files locally; you send them manually.
+   Do not delete learning or repeatedly rerun the wizard to fix a bridge error.
+
+OPTIONAL LOCAL INSTRUMENT CHECK
+Setup > Instrument sync monitor > Open monitor. Change one knob/switch at a
+time. Recent changes show Covered plus Both pilots / Host-to-copilot direction.
+Search heading or altimeter to inspect definitions/readouts. Pause/Clear only
+affect the display. Coverage is a local check; it does not prove peer delivery.
+GTN screens/touches remain independent. Flight-plan copying and remote GTN
+guidance selection are not implemented; guidance currently comes from the host.
+
+For the detailed parked/taxi/flight tests, use START HERE.txt and TEST RESULTS.txt
+inside the kit. The newest startup correction still needs simulator confirmation.

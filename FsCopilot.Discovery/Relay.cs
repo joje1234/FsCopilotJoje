@@ -3,10 +3,13 @@ namespace P2PDiscovery;
 using System.Buffers;
 using LiteNetLib;
 using LiteNetLib.Utils;
+using System.Net;
+using FsCopilot.Transport;
 
 public sealed class Relay : BackgroundService
 {
-    private const int Port = 3600;
+    private readonly int _port;
+    private readonly bool _loopbackOnly;
     private const byte ControlChannel = 0;
     private const int TickMs = 10;
 
@@ -20,10 +23,12 @@ public sealed class Relay : BackgroundService
     private readonly Dictionary<NetPeer, PeerState> _byPeer = new();
     private readonly Dictionary<string, PeerState> _byId = new(StringComparer.Ordinal);
 
-    public Relay(ILogger<Relay> logger, ServerStats stats)
+    public Relay(ILogger<Relay> logger, ServerStats stats, int port = 3600, bool loopbackOnly = false)
     {
         _logger = logger;
         _stats = stats;
+        _port = port;
+        _loopbackOnly = loopbackOnly;
 
         _net = new(_listener)
         {
@@ -31,7 +36,7 @@ public sealed class Relay : BackgroundService
             DisconnectTimeout = 15_000,
             NatPunchEnabled = false,
             UnconnectedMessagesEnabled = false,
-            ChannelsCount = 2
+            ChannelsCount = 3
         };
 
         _listener.ConnectionRequestEvent += OnConnectionRequest;
@@ -41,11 +46,13 @@ public sealed class Relay : BackgroundService
 
     public override Task StartAsync(CancellationToken cancellationToken)
     {
-        if (!_net.Start(Port))
-            throw new InvalidOperationException($"Failed to start the server on UDP port '{Port}'.");
-        _logger.LogInformation("Server started on UDP port: {Port}", Port);
+        if (!(_loopbackOnly ? _net.Start(IPAddress.Loopback, IPAddress.IPv6Loopback, _port) : _net.Start(_port)))
+            throw new InvalidOperationException($"Failed to start the server on UDP port '{_port}'.");
+        _logger.LogInformation("Server started on UDP port: {Port}", _net.LocalPort);
         return base.StartAsync(cancellationToken);
     }
+
+    public int LocalPort => _net.LocalPort;
 
     public override Task StopAsync(CancellationToken cancellationToken)
     {
@@ -92,9 +99,17 @@ public sealed class Relay : BackgroundService
         var peer = request.Accept();
         if (peer == null) return;
 
-        var ps = new PeerState(peerId, schemaId, peer);
+        var originAware = token.Split(';', StringSplitOptions.TrimEntries).Contains("origin=1") && RelayOriginFrame.ValidPeer(peerId);
+        var ps = new PeerState(peerId, schemaId, peer, originAware);
         _byPeer[peer] = ps;
         _byId[peerId] = ps;
+        if (originAware)
+        {
+            var capabilities = new NetDataWriter();
+            capabilities.Put((byte)ControlType.Capabilities);
+            capabilities.Put((byte)1);
+            peer.Send(capabilities, ControlChannel, DeliveryMethod.ReliableOrdered);
+        }
 
         _logger.LogInformation("CONNECT pid={PeerId} schema={Schema} ep={Ep}", peerId, schemaId, peer.Address);
     }
@@ -144,6 +159,9 @@ public sealed class Relay : BackgroundService
                 return;
             }
 
+            // Client data is always unframed channel 1. Channel 2 is reserved for
+            // server-generated origin frames; clients cannot supply an origin.
+            if (channel != 1) return;
             // DATA: forward to all linked peers (broadcast inside "Sessions")
             ForwardToLinkedPeers(from, self, reader, channel, method);
         }
@@ -284,7 +302,7 @@ public sealed class Relay : BackgroundService
     // Data forwarding: broadcast to linked peers
     // ---------------------------------
 
-    private static void ForwardToLinkedPeers(NetPeer from, PeerState self, NetPacketReader reader, byte channel, DeliveryMethod method)
+    private void ForwardToLinkedPeers(NetPeer from, PeerState self, NetPacketReader reader, byte channel, DeliveryMethod method)
     {
         var len = reader.AvailableBytes;
         if (len <= 0) return;
@@ -293,6 +311,7 @@ public sealed class Relay : BackgroundService
         try
         {
             reader.GetBytes(buf, len);
+            byte[]? framed = null;
 
             var sessions = self.Sessions.ToArray();
             foreach (var peer in sessions)
@@ -300,8 +319,16 @@ public sealed class Relay : BackgroundService
                 if (Equals(peer, from)) continue;
                 if (peer.ConnectionState != ConnectionState.Connected) continue;
 
-                // Preserve delivery semantics (Unreliable stays Unreliable, ReliableOrdered stays ReliableOrdered)
-                peer.Send(buf, 0, len, channel, method);
+                if (_byPeer.TryGetValue(peer, out var target) && target.OriginAware &&
+                    RelayOriginFrame.ValidPeer(self.PeerId) && len <= RelayOriginFrame.MaxPayload)
+                {
+                    framed ??= RelayOriginFrame.Encode(self.PeerId, buf.AsSpan(0, len));
+                    peer.Send(framed, RelayOriginFrame.Channel, method);
+                }
+                else
+                    // Legacy recipients/oversized legacy packets remain usable,
+                    // but their clients cannot assert a sender-aware delivery.
+                    peer.Send(buf, 0, len, channel, method);
             }
         }
         finally
@@ -366,22 +393,25 @@ public sealed class Relay : BackgroundService
         // server -> client
         LinkReady = 10,
         LinkClosed = 11,
+        Capabilities = 12,
 
         Error = 255
     }
 
     private sealed class PeerState
     {
-        public PeerState(string peerId, string schemaId, NetPeer netPeer)
+        public PeerState(string peerId, string schemaId, NetPeer netPeer, bool originAware)
         {
             PeerId = peerId;
             SchemaId = schemaId;
             NetPeer = netPeer;
+            OriginAware = originAware;
         }
 
         public string PeerId { get; }
         public string SchemaId { get; }
         public NetPeer NetPeer { get; }
+        public bool OriginAware { get; }
 
         // "Sessions" == currently linked peers (relay links)
         public HashSet<NetPeer> Sessions { get; } = new();

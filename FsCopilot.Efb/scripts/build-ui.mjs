@@ -2,8 +2,8 @@ import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 const root = new URL('../', import.meta.url);
-const css = readFileSync(new URL('src/controls.css', root), 'utf8');
-export const bundle = '/*\n' + readFileSync(new URL('THIRD_PARTY_NOTICES.txt', root), 'utf8') + '\n*/\n' + ['controller.js', 'view.js', 'app.js'].map(name => {
+const css = readFileSync(new URL('src/controls.css', root), 'utf8').replace(/\r\n/g, '\n');
+export const bundle = '/*\n' + readFileSync(new URL('THIRD_PARTY_NOTICES.txt', root), 'utf8') + '\n*/\n' + ['controller.js', 'instrument-monitor.js', 'view.js', 'navigation.js', 'app.js'].map(name => {
     const source = readFileSync(new URL('src/' + name, root), 'utf8');
     return name === 'app.js' ? source.replace("/*__FSC_STYLE__*/ ''", JSON.stringify(css)) : source;
 }).join('\n');

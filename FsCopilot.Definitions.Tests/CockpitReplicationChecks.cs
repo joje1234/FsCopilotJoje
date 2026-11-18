@@ -1,0 +1,55 @@
+using FsCopilot.Simulation;
+static class CockpitReplicationChecks {
+    public static void Run(Action<bool,string> check) {
+        var host=new CockpitReplication(true,[true,true,false]);var guest=new CockpitReplication(false,[true,true,false]);
+        host.Observe([1013.25,1000,20]);guest.Observe([900,900,5]);
+        foreach(var change in host.Drain()) check(guest.Receive(change),"Initial host values establish a baseline before guest input.");
+        while(guest.NextWrite() is { } seed) guest.CompleteWrite(true);
+        check(guest.Drain().Length==0,"Initial synchronization cannot bounce back as local knob input.");
+        guest.Observe([1014,1000,20]);var request=guest.Drain().Single();
+        check(request.Request && request.Values.Single().Index==0 && host.Receive(request),"Either pilot can adjust a normally shared altimeter.");
+        var write=host.NextWrite();check(write is {Index:0,Desired:1014,Current:1013.25},"Host executes the received absolute setting against current readback.");
+        host.Observe([1014,1000,20]);check(host.Drain().Length==0,"Output readback waits for command confirmation.");
+        host.CompleteWrite(true);foreach(var change in host.Drain())check(guest.Receive(change),"Confirmed changes return to the follower.");
+        check(guest.NextWrite() is null && guest.Drain().Length==0,"An already matching follower neither rewrites nor echoes the setting.");
+        var sh=new CockpitReplication(true,[true]);var sp=new CockpitReplication(false,[true]);
+        sh.Observe([0]);sp.Observe([0]);foreach(var p in sh.Drain())sp.Receive(p);
+        sp.Observe([1]);var proposal=sp.Drain().Single();sh.Snapshot();
+        foreach(var p in sh.Drain())check(sp.Receive(p),"Periodic host snapshots retain valid transport ordering.");
+        check(sp.NextWrite() is null,"An unchanged host revision cannot undo an in-flight local switch proposal.");
+        check(sh.Receive(proposal)&&sh.NextWrite() is {Desired:1},"Host still accepts the local switch after its older snapshot.");
+        sh.CompleteWrite(true);foreach(var p in sh.Drain())sp.Receive(p);sp.Observe([1]);
+        check(sp.NextWrite() is null&&sp.Drain().Length==0,"A confirmed local switch proposal has no writeback or echo.");
+        host.Observe([1014,999,20]);foreach(var change in host.Drain())check(guest.Receive(change),"The second altimeter remains independently shared.");
+        var right=guest.NextWrite();check(right is {Index:1,Desired:999},"A right-altimeter update cannot write the left instrument.");
+        guest.Observe([1014,999,20]);guest.CompleteWrite(true);check(guest.Drain().Length==0,"Received right-altimeter output is suppressed from input.");
+        host.Observe([1018,999,20]);host.Drain();
+        var old=new CockpitChange(true,request.Sequence+1,[new(0,1,1100)]);check(host.Receive(old)&&host.NextWrite() is null,"A request based on an obsolete revision cannot override a newer physical host adjustment.");
+        host.Drain();check(!host.Receive(old),"Replayed changes are refused.");
+        guest.Observe([1014,999,30]);check(guest.Drain().Length==0,"Host-only definitions cannot be written by the follower.");
+        check(!guest.Receive(new(false,100,[new(0,1,1010)])),"Old authoritative revisions cannot roll back a current instrument.");
+        check(!host.Receive(new(true,100,[new(0,1,double.NaN)])),"Nonfinite network values never reach vanilla expressions.");
+        var rapid=new CockpitReplication(true,[true]);rapid.Observe([10]);rapid.Drain();
+        check(rapid.Receive(new(true,1,[new(0,1,11)])),"First rotary adjustment accepted.");check(rapid.NextWrite() is not null,"First rotary write is planned.");
+        rapid.Snapshot();check(rapid.Drain().Length==0,"Periodic snapshots cannot rebroadcast an old value while an accepted peer setter is pending.");
+        rapid.Receive(new(true,2,[new(0,1,12)]));rapid.CompleteWrite(true);
+        check(rapid.NextWrite() is {Desired:12,Revision:2},"A rapid newer adjustment survives confirmation of the earlier write.");
+        rapid.CompleteWrite(false);check(rapid.NextWrite() is null,"Failed output is not blindly toggled repeatedly.");
+        var ah=new CockpitReplication(true,[true]);var ap=new CockpitReplication(false,[true]);
+        ah.Observe([10]);ap.Observe([10]);foreach(var p in ah.Drain())ap.Receive(p);
+        ap.Observe([11]);var first=ap.Drain().Single();check(ah.Receive(first)&&ah.NextWrite() is not null,"First peer edit is in flight.");
+        ap.Observe([12]);var second=ap.Drain().Single();
+        ah.CompleteWrite(true);var earlierReceipt=ah.Drain().Single();check(earlierReceipt.Values[0].Acknowledged==first.Sequence && ap.Receive(earlierReceipt),"Host receipts identify the accepted peer edit.");
+        check(ap.NextWrite() is null,"A valid earlier receipt cannot move the peer knob back from a newer proposal.");
+        check(ah.Receive(second)&&ah.NextWrite() is {Desired:12},"The latest queued peer edit survives the earlier receipt.");
+        ah.CompleteWrite(true);foreach(var p in ah.Drain())check(ap.Receive(p),"Latest peer receipt is accepted.");
+        ap.Observe([12]);check(ap.NextWrite() is null&&ap.Drain().Length==0&&ap.Matches(0),"Latest rotary value stays settled without output echo.");
+        var noop=new CockpitReplication(true,[true],[.022]);noop.Observe([10.5]);noop.Drain();noop.Observe([10.51]);
+        check(noop.Receive(new(true,1,[new(0,1,10.51)]))&&noop.NextWrite() is null,"An already matching peer request needs no SDK write.");
+        var receipt=noop.Drain().Single().Values.Single();noop.Snapshot();var snapshot=noop.Drain().Single().Values.Single();
+        check(receipt==snapshot&&receipt.Acknowledged==1,"No-op receipts and periodic snapshots keep the exact same value and acknowledgement at a revision.");
+        rapid.Observe([null]);check(!rapid.Known(0),"An unavailable live reading cannot remain a known fresh value.");
+        rapid.Drain();rapid.Snapshot();check(rapid.Drain().Length==0,"A fresh host snapshot excludes readings that became unavailable.");
+        host.Close();check(!host.Receive(new(true,1000,[new(0,2,1050)]))&&host.NextWrite() is null,"Session end stops ordinary writes and retires queued changes.");
+    }
+}

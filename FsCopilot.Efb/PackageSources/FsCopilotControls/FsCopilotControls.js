@@ -32,6 +32,22 @@ SOFTWARE.
 
     var COMMAND_EVENT = 'FSC_CONTROLS_TEST_COMMAND';
     var STATUS_EVENT = 'FSC_CONTROLS_TEST_STATUS';
+    var groups = ['steering', 'quadrant', 'throttle', 'propeller', 'mixture'];
+    var pairs = ['throttle', 'propeller', 'mixture'];
+    function sharedActive(snapshot) { return !!(snapshot && snapshot.shared && [2, 3].includes(snapshot.shared.phase)); }
+    function sharedGroup(snapshot, group) {
+        if (!sharedActive(snapshot)) return null;
+        var shared = snapshot.shared, mask = group === 'steering' ? 1 : group === 'quadrant' ? 14 : 2 << pairs.indexOf(group);
+        var owners = shared.owners.filter((owner, index) => mask & (1 << index));
+        return { owner: owners.every(owner => owner === 1) ? 'me' : owners.every(owner => owner === 2) ? 'mock' : null,
+            mixed: new Set(owners).size > 1, attached: (shared.attached & mask) === mask,
+            transferring: !!((shared.pending | shared.waiting | shared.other) & mask) };
+    }
+    function commonTolerance(snapshot) {
+        if (!snapshot) return null;
+        var values = ['steering'].concat(pairs).map(group => snapshot.pickup[group].tolerance);
+        return values.every(value => value === values[0]) ? values[0] : null;
+    }
 
     function validActivity(value) {
         return value && Number.isSafeInteger(value.seen) && value.seen >= 0 &&
@@ -39,13 +55,115 @@ SOFTWARE.
             typeof value.last === 'string' && typeof value.value === 'number';
     }
 
+    function validConnectionSettings(value) {
+        return !!(value && typeof value.relay === 'string' && value.relay.length > 0 && value.relay.length <= 127 &&
+            value.relay.split('.').every(label => label.length > 0 && label.length <= 63 && /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/.test(label)) &&
+            Number.isInteger(value.port) && value.port >= 1 && value.port <= 65535 &&
+            typeof value.local === 'string' && /^[a-z0-9]{8}$/.test(value.local) && typeof value.peer === 'string' && /^[a-z0-9]{8}$/.test(value.peer) &&
+            value.local !== value.peer && [1, 2].includes(value.role) && [1, 2].includes(value.seat));
+    }
     function validStatus(value) {
-        return value && value.version === 1 && typeof value.session === 'string' && /^[a-f0-9]{1,23}$/.test(value.session) &&
+        var connection = value && value.connection;
+        if (connection !== undefined && (!connection || connection.api !== 1 || !Number.isInteger(connection.revision) || connection.revision < 0 || connection.revision > 4294967295 ||
+            !Number.isInteger(connection.backend) || connection.backend < 0 || connection.backend > 7 || !Number.isInteger(connection.code) || connection.code < 0 || connection.code > 6 ||
+            (connection.revision ? !validConnectionSettings(connection) : connection.relay !== '' || connection.local !== '' || connection.peer !== '' || connection.port !== 0 || connection.role !== 0 || connection.seat !== 0))) return false;
+        function validPickup(value) {
+            return value && typeof value.waiting === 'boolean' && [1, 2, 3, 5, 10, 20, 30].includes(value.tolerance) &&
+                (value.automation === undefined || typeof value.automation === 'boolean') &&
+                typeof value.autoEnabled === 'boolean' &&
+                Array.isArray(value.axes) && value.axes.length <= 21 && new Set(value.axes.map(axis => axis && axis.id)).size === value.axes.length &&
+                value.axes.every(axis => axis && typeof axis.id === 'string' && /^[a-zA-Z0-9]{1,24}$/.test(axis.id) &&
+                    typeof axis.label === 'string' && axis.label.length <= 32 &&
+                    (axis.saved === undefined || typeof axis.saved === 'boolean') &&
+                    (axis.fixed === undefined || typeof axis.fixed === 'boolean') &&
+                    (axis.relative === undefined || typeof axis.relative === 'boolean') &&
+                    [axis.input, axis.target].every(position => position === null || Number.isFinite(position) && position >= 0 && position <= 100) &&
+                    typeof axis.calibrated === 'boolean' && typeof axis.fresh === 'boolean' && typeof axis.aligned === 'boolean');
+        }
+        var shared = value && value.shared;
+        var guidance = value && value.guidance;
+        var cockpit = value && value.cockpit;
+        var recovery = cockpit && cockpit.recovery;
+        if (recovery !== undefined && (!recovery || !Number.isInteger(recovery.phase) || recovery.phase < 0 || recovery.phase > 4 ||
+            !['checked','corrected','pending','failed','unavailable'].every(key => Number.isInteger(recovery[key]) && recovery[key] >= 0 && recovery[key] <= 512) ||
+            recovery.corrected > recovery.checked || typeof recovery.issues !== 'string' || recovery.issues.length > 1023)) return false;
+        var binding = value && value.forceButton;
+        if (binding !== undefined && (!binding || !['saved','ready','armed','listening','captured'].every(key => typeof binding[key] === 'boolean') ||
+            !Number.isInteger(binding.button) || binding.button < 1 || binding.button > 128 || typeof binding.name !== 'string' || binding.name.length > 255 ||
+            typeof binding.error !== 'string' || binding.error.length > 200 || !Array.isArray(binding.devices) || binding.devices.length > 16 ||
+            !binding.devices.every(d => d && Number.isInteger(d.id) && d.id >= 0 && d.id <= 4294967295 && typeof d.name === 'string' && d.name.length <= 255))) return false;
+        if (cockpit !== undefined && (!cockpit || typeof cockpit.available !== 'boolean' || typeof cockpit.sharing !== 'boolean' ||
+            !Number.isInteger(cockpit.count) || cockpit.count < 0 || cockpit.count > 512 || !Number.isInteger(cockpit.known) || cockpit.known < 0 || cockpit.known > cockpit.count ||
+            !Number.isInteger(cockpit.result) || cockpit.result < 0 || cockpit.result > 4 || cockpit.sharing && !cockpit.available)) return false;
+        var outputCheck = value && value.outputCheck;
+        var wizard = value && value.wizard;
+        if (wizard !== undefined && (!wizard || !Number.isInteger(wizard.phase) || wizard.phase < 0 || wizard.phase > 8 ||
+            !['steering', 'throttle', 'propeller', 'mixture'].includes(wizard.group) || !Number.isInteger(wizard.needed) || wizard.needed < 0 || wizard.needed >= 2097152 ||
+            !Number.isInteger(wizard.axis) || wizard.axis < 0 || wizard.axis > 21 || typeof wizard.ready !== 'boolean' ||
+            !['message', 'prerequisite'].every(key => typeof wizard[key] === 'string' && wizard[key].length <= 200) ||
+            (wizard.resetReady !== undefined || wizard.resetReason !== undefined) && (typeof wizard.resetReady !== 'boolean' || typeof wizard.resetReason !== 'string' || wizard.resetReason.length > 200))) return false;
+        if (outputCheck !== undefined && (!outputCheck || typeof outputCheck.available !== 'boolean' ||
+            outputCheck.writable !== undefined && typeof outputCheck.writable !== 'boolean' ||
+            outputCheck.storage !== undefined && !['waiting', 'ready', 'unavailable'].includes(outputCheck.storage) ||
+            outputCheck.saved !== undefined && (!Number.isInteger(outputCheck.saved) || outputCheck.saved < 0 || outputCheck.saved > 15 || (outputCheck.saved & ~outputCheck.passed)) ||
+            !Number.isInteger(outputCheck.phase) || outputCheck.phase < 0 || outputCheck.phase > 5 ||
+            !['steering', 'throttle', 'propeller', 'mixture'].includes(outputCheck.group) ||
+            !Number.isInteger(outputCheck.passed) || outputCheck.passed < 0 || outputCheck.passed > 15 || typeof outputCheck.restored !== 'boolean')) return false;
+        if (guidance !== undefined && (!guidance || !Number.isSafeInteger(guidance.serial) || guidance.serial < 0 ||
+            typeof guidance.fresh !== 'boolean' || !Number.isInteger(guidance.switches) || guidance.switches < 0 || guidance.switches > 8191 ||
+            !Number.isFinite(guidance.heading) || guidance.heading < 0 || guidance.heading >= 360 ||
+            !Number.isFinite(guidance.altitude) || guidance.altitude < -2000 || guidance.altitude > 100000 ||
+            !Number.isFinite(guidance.verticalSpeed) || Math.abs(guidance.verticalSpeed) > 12000 ||
+            typeof guidance.gps !== 'boolean' || ![0, 1, 2].includes(guidance.nav) || guidance.outputAvailable !== false ||
+            !Array.isArray(guidance.slots) || guidance.slots.length !== 3 || !guidance.slots.every(slot => Number.isInteger(slot) && slot >= 0 && slot <= 4) ||
+            !Array.isArray(guidance.targetSlots) || guidance.targetSlots.length !== 3 || !guidance.targetSlots.every(slot => Number.isInteger(slot) && slot >= 0 && slot <= 3) ||
+            guidance.serial === 0 && (guidance.fresh || guidance.switches || guidance.heading || guidance.altitude || guidance.verticalSpeed || guidance.gps || guidance.nav || guidance.slots.some(Boolean)))) return false;
+        var altimeters = value && value.altimeters;
+        if (altimeters !== undefined && (!altimeters || !Number.isSafeInteger(altimeters.serial) || altimeters.serial < 0 || typeof altimeters.fresh !== 'boolean' ||
+            !Array.isArray(altimeters.pressure16) || altimeters.pressure16.length !== 2 || !Array.isArray(altimeters.standard) || altimeters.standard.length !== 2 ||
+            !altimeters.standard.every(flag => typeof flag === 'boolean') ||
+            (altimeters.serial === 0 ? altimeters.fresh || altimeters.pressure16.some(value => value !== 0) || altimeters.standard.some(Boolean) :
+                !altimeters.pressure16.every(value => Number.isInteger(value) && value >= 8000 && value <= 19200)))) return false;
+        if (altimeters && ['nativeFlags', 'reported', 'sharedPhase', 'pending'].some(key => altimeters[key] !== undefined)) {
+            var flags = altimeters.nativeFlags;
+            if (!Number.isInteger(flags) || flags < 0 || flags > 1023 || typeof altimeters.reported !== 'boolean' ||
+                !Number.isInteger(altimeters.sharedPhase) || altimeters.sharedPhase < 0 || altimeters.sharedPhase > 8 ||
+                !Number.isInteger(altimeters.pending) || altimeters.pending < 0 || altimeters.pending > 3 ||
+                (altimeters.issue !== undefined && ![0, 1].includes(altimeters.issue)) ||
+                !!(flags & 1) !== altimeters.fresh || ((flags & 4) && !(flags & 2)) || ((flags & 8) && (flags & 5) !== 5) ||
+                ((flags & 1008) && !(flags & 2)) || ((flags & 128) && (flags & 320) !== 320) || ((flags & 64) && (flags & 8)) ||
+                (!altimeters.reported && (altimeters.sharedPhase !== 0 || altimeters.pending !== 0 || altimeters.issue))) return false;
+        }
+        if (value && value.camera !== undefined && (!value.camera || ![0, 1, 2].includes(value.camera.seat) || ![0, 1, 2, 3, 4].includes(value.camera.phase))) return false;
+        if (shared && shared.seatRevision !== undefined && (!Number.isInteger(shared.seatRevision) || shared.seatRevision < 0 || shared.seatRevision > 4294967295 ||
+            ![0, 1, 2].includes(shared.seat) || ![0, 1, 2, 3, 4].includes(shared.seatPending) ||
+            !Number.isInteger(shared.seatRequest) || shared.seatRequest < 0 || shared.seatRequest > 4294967295 ||
+            (shared.seatRevision === 0 ? shared.seat !== 0 || shared.seatPending !== 0 || shared.seatRequest !== 0 :
+                shared.seat === 0 || (shared.seatPending === 0) !== (shared.seatRequest === 0)))) return false;
+        if (shared !== undefined && (!shared || ![0, 1, 2, 3, 4].includes(shared.phase) ||
+            (shared.session === undefined) !== (shared.serial === undefined) ||
+            (shared.session !== undefined && (typeof shared.session !== 'string' || !/^(?:[a-f0-9]{32})?$/.test(shared.session) ||
+                !Number.isSafeInteger(shared.serial) || shared.serial <= 0 || [2, 3].includes(shared.phase) && shared.session === '')) ||
+            (shared.holding !== undefined && typeof shared.holding !== 'boolean') ||
+            (shared.needsRecovery !== undefined && (typeof shared.needsRecovery !== 'boolean' || shared.needsRecovery && !shared.holding)) ||
+            !Array.isArray(shared.owners) || shared.owners.length !== 4 || !shared.owners.every(owner => [0, 1, 2].includes(owner)) ||
+            !['attached', 'pending', 'waiting', 'other'].every(key => Number.isInteger(shared[key]) && shared[key] >= 0 && shared[key] <= 15) ||
+            (shared.waiting & shared.other))) return false;
+        return !!(value && value.version === 5 && typeof value.session === 'string' && /^[a-f0-9]{1,23}$/.test(value.session) &&
+            (value.learningStorage === undefined || ['waiting', 'saving', 'ready', 'unavailable'].includes(value.learningStorage)) &&
+            (value.mixtureReference === undefined || ['cockpit', 'standard', 'waiting'].includes(value.mixtureReference)) &&
             Number.isSafeInteger(value.revision) && value.revision >= 0 &&
             typeof value.client === 'string' && Number.isSafeInteger(value.request) && value.request >= 0 &&
             typeof value.ready === 'boolean' && typeof value.applying === 'boolean' &&
             typeof value.steeringBlocked === 'boolean' && typeof value.quadrantBlocked === 'boolean' &&
-            typeof value.error === 'string' && validActivity(value.steering) && validActivity(value.quadrant);
+            typeof value.advanced === 'boolean' && [0, 14].includes(value.autoMask) &&
+            typeof value.quadrantMixed === 'boolean' && typeof value.quadrantToleranceMixed === 'boolean' &&
+            pairs.every(group => typeof value[group + 'Blocked'] === 'boolean') &&
+            value.quadrantBlocked === pairs.every(group => value[group + 'Blocked']) &&
+            value.quadrantMixed === (pairs.some(group => value[group + 'Blocked']) && !value.quadrantBlocked) &&
+            typeof value.error === 'string' && value.pickup && groups.every(group => validActivity(value[group]) && validPickup(value.pickup[group])) &&
+            !value.pickup.steering.autoEnabled && value.pickup.quadrant.autoEnabled === !!value.autoMask &&
+            pairs.every((group, index) => value.pickup[group].autoEnabled === !!(value.autoMask & (2 << index))));
     }
 
     class Controller {
@@ -63,6 +181,8 @@ SOFTWARE.
             this.unsubscribe = null;
             this.timer = null;
             this.retiredSessions = new Set();
+            this.routeInspector = null;
+            this.navigation = { phase: 'unavailable', message: 'Avionics route interface is unavailable.', summary: '', responses: 0 };
         }
 
         start() {
@@ -78,6 +198,7 @@ SOFTWARE.
             this.timer = null;
             this.unsubscribe = null;
             this.listeners.clear();
+            if (this.routeInspector) this.routeInspector.dispose();
         }
 
         subscribe(listener) {
@@ -90,9 +211,12 @@ SOFTWARE.
             var online = this.now() - this.receivedAt < 3000;
             return {
                 online: online,
-                usable: !!(online && this.snapshot && this.snapshot.ready && !this.snapshot.applying && !this.pending),
+                usable: !!(online && this.snapshot && this.snapshot.ready && !this.snapshot.applying && !this.pending &&
+                    !(this.snapshot.wizard && this.snapshot.wizard.phase >= 1 && this.snapshot.wizard.phase <= 5) &&
+                    !(this.snapshot.outputCheck && [1, 2, 3].includes(this.snapshot.outputCheck.phase))),
                 snapshot: this.snapshot,
                 pending: this.pending,
+                navigation: this.navigation,
                 error: this.error || (this.snapshot ? this.snapshot.error : '')
             };
         }
@@ -101,6 +225,12 @@ SOFTWARE.
             var state = this.state();
             this.listeners.forEach(listener => listener(state));
         }
+        configureRouteInspector(inspector) {
+            if (this.routeInspector) return;
+            this.routeInspector = inspector;
+            inspector.subscribe(state => { this.navigation = state; this.notify(); });
+        }
+        inspectAvionicsRoute() { return this.routeInspector ? this.routeInspector.inspect() : Promise.resolve(false); }
 
         receive(raw) {
             var status;
@@ -108,6 +238,13 @@ SOFTWARE.
             catch (_) { return; }
             if (!validStatus(status) || this.retiredSessions.has(status.session)) return;
             if (this.snapshot && status.session === this.snapshot.session && status.revision < this.snapshot.revision) return;
+            if (this.snapshot && status.session === this.snapshot.session && this.snapshot.connection &&
+                (!status.connection || status.connection.revision < this.snapshot.connection.revision)) return;
+            var beforeShared = this.snapshot && this.snapshot.shared;
+            if (this.snapshot && status.session === this.snapshot.session && beforeShared && beforeShared.serial !== undefined &&
+                (!status.shared || status.shared.serial === undefined || status.shared.serial < beforeShared.serial ||
+                    status.shared.serial === beforeShared.serial && status.shared.session !== beforeShared.session ||
+                    status.shared.session === beforeShared.session && status.shared.seatRevision < beforeShared.seatRevision && [2, 3].includes(status.shared.phase))) return;
             if (this.snapshot && status.session !== this.snapshot.session) {
                 this.retiredSessions.add(this.snapshot.session);
                 this.pending = null;
@@ -117,7 +254,7 @@ SOFTWARE.
             this.receivedAt = this.now();
             if (this.pending && status.client === this.client && status.request === this.pending.id) {
                 // A read reply or periodic update must never acknowledge a mutation.
-                if (!status.applying) {
+                if (!status.applying || status.error || this.pending.operation.indexOf('instruments|') === 0) {
                     this.error = status.error;
                     this.pending = null;
                 }
@@ -128,20 +265,126 @@ SOFTWARE.
 
         send(operation) {
             var id = ++this.nextRequest;
-            var packet = '1|' + this.client + '|' + id + '|' + operation;
+            var packet = '5|' + this.client + '|' + id + '|' + operation;
             this.transport.send(packet);
             return id;
         }
 
         setOwner(group, owner) {
-            if ((group !== 'steering' && group !== 'quadrant') || (owner !== 'me' && owner !== 'mock')) return false;
+            var cancel = owner === 'mock' && pairs.includes(group) && this.snapshot && this.snapshot.pickup[group].waiting;
+            if ((!this.availableGroup(group) && !cancel) || (owner !== 'me' && owner !== 'mock')) return false;
+            if (owner === 'mock' && sharedActive(this.snapshot) && this.snapshot.pickup[group].waiting) return this.cancelTakeover(group);
             return this.mutate('set|' + group + '|' + owner);
         }
 
-        restore() { return this.mutate('restore'); }
+        cancelTakeover(group) {
+            if (!groups.includes(group)) return false;
+            return sharedActive(this.snapshot) ? this.mutate('cancel|' + group + '|pending') : this.setOwner(group, 'mock');
+        }
+        checkOutput(group) {
+            if (!this.availableGroup(group) || !['steering', 'throttle', 'propeller', 'mixture'].includes(group) || !this.snapshot ||
+                !this.snapshot.outputCheck || !this.snapshot.outputCheck.available || this.snapshot.outputCheck.writable === false ||
+                this.snapshot.shared && this.snapshot.shared.phase !== 0 || !this.snapshot[group + 'Blocked']) return false;
+            return this.mutate('check-output|' + group + '|start');
+        }
+        startWizard() {
+            var wizard = this.snapshot && this.snapshot.wizard;
+            if (!wizard || !wizard.ready || wizard.phase >= 1 && wizard.phase <= 5) return false;
+            return this.mutate('wizard-start', true);
+        }
+        resetSetup() {
+            var wizard = this.snapshot && this.snapshot.wizard;
+            if (!wizard || wizard.resetReady !== true || wizard.phase >= 1 && wizard.phase <= 5) return false;
+            return this.mutate('reset-setup', true);
+        }
+        cancelWizard() {
+            var wizard = this.snapshot && this.snapshot.wizard;
+            if (!wizard || wizard.phase < 1 || wizard.phase > 5) return false;
+            return this.mutate('wizard-cancel', true);
+        }
+        forceWizardGroup() {
+            var wizard = this.snapshot && this.snapshot.wizard;
+            if (!wizard || !this.snapshot[wizard.group + 'Blocked']) return false;
+            return this.mutate('force|' + wizard.group + '|me', true);
+        }
+        sharedSession() {
+            if (!this.snapshot || !this.snapshot.shared) return false;
+            if (![1, 2, 3].includes(this.snapshot.shared.phase) && this.snapshot.connection &&
+                (this.snapshot.shared.needsRecovery || !this.snapshot.connection.revision || ![2, 6].includes(this.snapshot.connection.backend))) return false;
+            return this.mutate([1, 2, 3].includes(this.snapshot.shared.phase) ? 'leave' : 'join');
+        }
+        changeSeat(action) {
+            var shared = this.snapshot && this.snapshot.shared;
+            if (!shared || shared.phase !== 3 || !shared.seatRevision ||
+                !['request', 'accept', 'decline', 'cancel'].includes(action) ||
+                (action === 'request' ? shared.seatPending !== 0 :
+                    action === 'cancel' ? ![1, 3].includes(shared.seatPending) : action === 'decline' ? ![2, 4].includes(shared.seatPending) : shared.seatPending !== 2)) return false;
+            return this.mutate(['seat', action, shared.seatRevision, shared.seatRequest].join('|'));
+        }
+        setConnection(value) {
+            if (!validConnectionSettings(value) || !this.snapshot || !this.snapshot.connection ||
+                this.snapshot.shared && ([1, 2, 3].includes(this.snapshot.shared.phase) || this.snapshot.shared.holding)) return false;
+            return this.mutate(['connect', value.relay, value.port, value.local, value.peer, value.role === 1 ? 'host' : 'guest', value.seat === 1 ? 'pilot' : 'copilot'].join('|'));
+        }
 
-        mutate(operation) {
+        restore() { return this.mutate('restore'); }
+        canUseLocalInstruments() {
+            var state = this.state(), baro = this.snapshot && this.snapshot.altimeters;
+            var flags = baro && baro.nativeFlags;
+            return !!(state.online && this.snapshot.ready && !this.pending && Number.isInteger(flags) && (flags & 2) && !(flags & 128) &&
+                ((flags & 304) || baro.reported && [1, 2, 3, 4, 7].includes(baro.sharedPhase)));
+        }
+        useLocalInstruments() {
+            if (!this.canUseLocalInstruments()) return false;
+            return this.mutate('instruments|local|' + ((this.snapshot.shared && this.snapshot.shared.session) || '0'), true);
+        }
+
+        forceTakeover(group) {
+            if (!this.availableGroup(group)) return false;
+            return this.mutate('force|' + group + '|me');
+        }
+        resyncCockpit() {
+            var state = this.state(), cockpit = this.snapshot && this.snapshot.cockpit;
+            if (!state.usable || !cockpit || !cockpit.sharing || cockpit.recovery && [1,2].includes(cockpit.recovery.phase)) return false;
+            return this.mutate('resync-cockpit');
+        }
+        configureForceButton(action, device) {
+            var binding = this.snapshot && this.snapshot.forceButton;
+            if (!this.state().usable || !binding || !['listen','cancel','clear'].includes(action)) return false;
+            if (action === 'listen' && (!Number.isInteger(device) || !binding.devices.some(d => d.id === device))) return false;
+            return this.mutate('force-button|' + action + '|' + (action === 'listen' ? device : 0));
+        }
+
+        setTolerance(group, percent) {
+            if (group !== 'all' && !this.availableGroup(group) || ![1, 2, 3, 5, 10, 20, 30].includes(percent)) return false;
+            return this.mutate('tolerance|' + group + '|' + percent);
+        }
+        cycleTolerance() {
             if (!this.state().usable) return false;
+            var current = commonTolerance(this.snapshot);
+            return this.setTolerance('all', current === 10 ? 20 : current === 20 ? 30 : 10);
+        }
+
+        relearn(group) {
+            if (!this.availableGroup(group) || sharedActive(this.snapshot)) return false;
+            return this.mutate('learn|' + group + '|reset');
+        }
+
+        availableGroup(group) { return groups.includes(group); }
+
+        setAdvanced(enabled) {
+            if (typeof enabled !== 'boolean') return false;
+            return this.mutate('advanced|quadrant|' + (enabled ? 'on' : 'off'));
+        }
+
+        setAuto(enabled) {
+            if (typeof enabled !== 'boolean') return false;
+            return this.mutate('auto|quadrant|' + (enabled ? 'on' : 'off'));
+        }
+
+        mutate(operation, independent) {
+            var state = this.state();
+            if (independent ? !state.online || !this.snapshot || !this.snapshot.ready || this.pending : !state.usable) return false;
             // Install pending before sending: a transport can reply synchronously.
             this.pending = { id: this.nextRequest + 1, started: this.now(), operation: operation };
             this.error = '';
@@ -193,117 +436,1305 @@ SOFTWARE.
                 if (!ensureListener()) throw new Error('CommBus is not ready');
                 var result = listener.callWasm(COMMAND_EVENT, packet);
                 if (result && typeof result.catch === 'function') result.catch(function () { /* timeout exposes delivery failure */ });
+            },
+            reportNavigation: function (canonical) {
+                if (!ensureListener()) return;
+                var result=listener.callWasm('FSC_AVIONICS_ROUTE_DIAGNOSTIC',canonical);
+                if(result && typeof result.catch==='function')result.catch(function(){});
             }
         };
     }
 
-    root.FscControls = { Controller: Controller, createCommBusTransport: createCommBusTransport, validStatus: validStatus };
+    root.FscControls = { Controller: Controller, createCommBusTransport: createCommBusTransport, validStatus: validStatus, validConnectionSettings: validConnectionSettings, commonTolerance: commonTolerance, sharedActive: sharedActive, sharedGroup: sharedGroup };
     if (typeof module !== 'undefined' && module.exports) module.exports = root.FscControls;
 })(typeof window !== 'undefined' ? window : globalThis);
 
 (function (root) {
     'use strict';
-
-    var cockpit = '<svg viewBox="0 0 460 460" aria-label="Cockpit viewed from above" role="img">' +
-        '<path class="fsc-shell" d="M75 412V145C75 72 140 30 230 30S385 72 385 145V412"/>' +
-        '<path class="fsc-panel" d="M94 140Q230 60 366 140L354 173H106Z"/>' +
-        '<path class="fsc-window" d="M113 112Q155 57 217 53V104L160 125Z M243 53Q305 57 347 112L300 125L243 104Z"/>' +
-        '<g class="fsc-seat" data-seat="me"><rect x="108" y="258" width="104" height="119" rx="25"/>' +
-        '<rect x="99" y="340" width="122" height="39" rx="15"/><text x="160" y="306">ME</text><text x="160" y="329">LEFT PILOT</text></g>' +
-        '<g class="fsc-seat" data-seat="mock"><rect x="248" y="258" width="104" height="119" rx="25"/>' +
-        '<rect x="239" y="340" width="122" height="39" rx="15"/><text x="300" y="306">MOCK</text><text x="300" y="329">COPILOT</text></g>' +
-        '<g class="fsc-steering" data-diagram="steering"><path d="M124 197v19q36 25 72 0v-19M160 218v28M264 197v19q36 25 72 0v-19M300 218v28"/>' +
-        '<rect x="122" y="151" width="27" height="13" rx="3"/><rect x="172" y="151" width="27" height="13" rx="3"/>' +
-        '<rect x="262" y="151" width="27" height="13" rx="3"/><rect x="312" y="151" width="27" height="13" rx="3"/></g>' +
-        '<g class="fsc-quadrant" data-diagram="quadrant"><rect x="210" y="179" width="40" height="86" rx="7"/>' +
-        '<path d="M217 189v59M222 189v59M228 189v59M233 189v59M239 189v59M244 189v59"/>' +
-        '<path class="fsc-lever-throttle" d="M217 205h5"/><path class="fsc-lever-prop" d="M228 218h5"/>' +
-        '<path class="fsc-lever-mixture" d="M239 198h5"/></g>' +
-        '<text class="fsc-diagram-label" x="230" y="421">LOCAL CONTROL TEST</text></svg>';
-
-    function card(group, title, description) {
-        return '<section class="fsc-card" data-card="' + group + '">' +
-            '<div class="fsc-card-heading"><h2>' + title + '</h2><span class="fsc-owner" data-owner="' + group + '">Waiting</span></div>' +
-            '<p class="fsc-description">' + description + '</p>' +
-            '<div class="fsc-selector" role="group" aria-label="' + title + ' owner">' +
-            '<button type="button" data-group="' + group + '" data-owner-choice="me" aria-pressed="false" disabled>Me</button>' +
-            '<button type="button" data-group="' + group + '" data-owner-choice="mock" aria-pressed="false" disabled>Mock copilot</button></div>' +
-            '<p class="fsc-result" data-result="' + group + '">Waiting for simulator confirmation.</p>' +
-            '<div class="fsc-activity"><span>Events seen <strong data-seen="' + group + '">0</strong></span>' +
-            '<span>Blocked <strong data-blocked="' + group + '">0</strong></span></div>' +
-            '<p class="fsc-last" data-last="' + group + '">Move a control to identify its event.</p></section>';
+    function valid(value, count) {
+        if (!value || typeof value.profile !== 'string' || value.profile.length > 64 || !/^[a-f0-9]*$/.test(value.profile) ||
+            !Number.isSafeInteger(value.sequence) || value.sequence < 0 || !Array.isArray(value.catalog) || value.catalog.length > 16 ||
+            !Array.isArray(value.changes) || value.changes.length > 12) return false;
+        function index(row) { return row && Number.isInteger(row.index) && row.index >= 0 && row.index < count; }
+        function text(value, size) { return typeof value === 'string' && value.length <= size && /^[\x20-\x7e]*$/.test(value); }
+        return new Set(value.catalog.map(row => row && row.index)).size === value.catalog.length &&
+            value.catalog.every(row => index(row) && text(row.name, 96) && row.name.length > 0 && (row.label === undefined || text(row.label, 96)) && text(row.units, 32) && typeof row.shared === 'boolean' && (row.value === null || Number.isFinite(row.value))) &&
+            new Set(value.changes.map(row => row && row.index)).size === value.changes.length &&
+            value.changes.every(row => index(row) && Number.isSafeInteger(row.sequence) && row.sequence > 0 && row.sequence <= value.sequence && Number.isFinite(row.before) && Number.isFinite(row.value));
     }
+    class InstrumentMonitor {
+        constructor(element) {
+            this.element = element; this.catalog = new Map(); this.key = ''; this.open = false; this.paused = false; this.cleared = 0; this.rows = []; this.current = null;
+            element.innerHTML = '<h2>Instrument sync monitor</h2><button type="button" data-monitor-action="open">Open monitor</button>' +
+                '<div data-monitor-body hidden><p class="fsc-storage" data-monitor-status role="status"></p>' +
+                '<p class="fsc-storage">Covered means configured for sharing. Confirming delivery requires both PCs. This monitor only reads values.</p>' +
+                '<button type="button" data-monitor-action="pause">Pause activity</button> <button type="button" data-monitor-action="clear">Clear activity</button>' +
+                '<h3>Recent instrument changes</h3><div data-monitor-changes></div>' +
+                '<label>Find a covered instrument <input type="search" data-monitor-filter placeholder="Heading, altimeter, lights…" maxlength="96"></label>' +
+                '<p class="fsc-storage" data-monitor-search-status></p><div data-monitor-matches></div>' +
+                '<p class="fsc-storage">GTN screens stay local. An absent entry can also mean that the aircraft exposes no readable value.</p></div>';
+        }
+        find(selector) { return this.element.querySelector(selector); }
+        update(snapshot, state) {
+            var cockpit = snapshot && snapshot.cockpit, monitor = cockpit && cockpit.monitor;
+            this.element.hidden = monitor === undefined;
+            if (monitor === undefined) return;
+            if (!state.online || !valid(monitor, cockpit.count)) {
+                this.find('[data-monitor-status]').textContent = state.online ? 'Instrument monitor data is unavailable.' : 'Bridge disconnected. Displayed readings are historical.';
+                return;
+            }
+            var key = snapshot.session + ':' + monitor.profile;
+            if (key !== this.key) { this.key = key; this.catalog.clear(); this.cleared = 0; this.rows = []; }
+            monitor.catalog.forEach(row => this.catalog.set(row.index, row));
+            this.current = monitor;
+            if (!this.paused) this.rows = monitor.changes.filter(row => row.sequence > this.cleared);
+            this.find('[data-monitor-status]').textContent = (cockpit.sharing ? 'Shared connection active. Observing values on this PC. ' : 'Local coverage check. No peer delivery is being tested. ') +
+                this.catalog.size + '/' + cockpit.count + ' definitions loaded.' + (this.paused ? ' Activity paused.' : '');
+            this.paint();
+        }
+        label(row) { return (row.label || row.name).replace(/^[ALB]:/, '').replace(/_/g, ' '); }
+        number(value) { return Number(value.toPrecision(8)).toString(); }
+        paint() {
+            var history = this.find('[data-monitor-changes]'); history.textContent = '';
+            if (!this.rows.length) history.textContent = 'Turn a knob or change a switch. Observed changes in covered instruments appear here.';
+            this.rows.forEach(change => {
+                var entry = this.catalog.get(change.index), row = this.element.ownerDocument.createElement('p'); row.className = 'fsc-monitor-row';
+                row.textContent = (entry ? this.label(entry) : 'Loading instrument #' + change.index) + ' · ' + this.number(change.before) + ' → ' + this.number(change.value) +
+                    (entry ? ' ' + entry.units + ' · Covered · ' + (entry.shared ? 'Both pilots' : 'Host → copilot') : ''); history.appendChild(row);
+            });
+            var query = (this.find('[data-monitor-filter]').value || '').trim().toLowerCase();
+            var matches = Array.from(this.catalog.values()).filter(row => (row.name + ' ' + (row.label || '') + ' ' + row.units).toLowerCase().includes(query));
+            var list = this.find('[data-monitor-matches]'); list.textContent = '';
+            this.find('[data-monitor-search-status]').textContent = !query ? 'Search the definitions loaded for this aircraft.' : matches.length ? matches.length + ' covered matches; showing up to 20.' : 'No covered match loaded. Try another name or allow the catalog to finish loading.';
+            if (query) matches.slice(0, 20).forEach(entry => {
+                var row = this.element.ownerDocument.createElement('p'); row.className = 'fsc-monitor-row';
+                row.textContent = this.label(entry) + ' · ' + (entry.shared ? 'Both pilots' : 'Host → copilot') + ' · ' +
+                    (entry.value === null ? 'Readout unavailable' : 'Last observed: ' + this.number(entry.value) + ' ' + entry.units);
+                list.appendChild(row);
+            });
+        }
+        click(target) {
+            if (!target.hasAttribute('data-monitor-action')) return false;
+            var action = target.getAttribute('data-monitor-action');
+            if (action === 'open') { this.open = !this.open; this.find('[data-monitor-body]').hidden = !this.open; target.textContent = this.open ? 'Close monitor' : 'Open monitor'; }
+            if (action === 'pause') { this.paused = !this.paused; target.textContent = this.paused ? 'Resume activity' : 'Pause activity'; }
+            if (action === 'clear') { this.cleared = this.current ? this.current.sequence : 0; this.rows = []; }
+            this.paint(); return true;
+        }
+    }
+    root.FscControls = root.FscControls || {};
+    root.FscControls.InstrumentMonitor = InstrumentMonitor;
+    root.FscControls.validInstrumentMonitor = valid;
+})(typeof window !== 'undefined' ? window : globalThis);
 
+(function (root) {
+    'use strict';
+    var ns = 'http://www.w3.org/2000/svg';
+    var pairs = ['throttle', 'propeller', 'mixture'];
+    var groups = ['steering', 'quadrant'].concat(pairs);
+    var titles = { steering: 'Steering', quadrant: 'Engine quadrant', throttle: 'Throttle', propeller: 'RPM', mixture: 'Mixture' };
+    function toleranceName(percent) { return percent === 10 ? 'Tight' : percent === 20 ? 'Medium' : percent === 30 ? 'Loose' : 'Custom'; }
+    var extraAxes = [];
+    var detailRadius = 6; // Half the default 12-unit corner radius.
+    var cockpit = '<svg viewBox="0 0 900 680" role="group" aria-label="Cockpit control assignment" data-cockpit><g data-cockpit-body>' +
+        '<path class="fsc-shell" d="M70 638V160C70 58 230 24 450 24S830 58 830 160V638A12 12 0 0 1 818 650H82A12 12 0 0 1 70 638Z"/>' +
+        '<path class="fsc-window" d="M130 119Q203 55 437 47V108L273 135Z M463 47Q697 55 770 119L627 135L463 108Z"/>' +
+        '<rect class="fsc-panel" x="112" y="151" width="676" height="71" rx="12"/>' +
+        '<g data-extra-axes></g>' +
+        '<g class="fsc-control fsc-unconfirmed" data-control="steering" role="button" tabindex="0" aria-disabled="true" aria-label="Assign steering to Me">' +
+        '<title>Steering includes both yokes, rudder pedals, nosewheel and toe brakes. Trims are shared separately. Select a seat, then tap a yoke or pedal.</title>' +
+        '<rect class="fsc-hit fsc-yoke-hit" x="137" y="244" width="186" height="199" rx="12"/>' +
+        '<rect class="fsc-hit fsc-yoke-hit" x="577" y="244" width="186" height="199" rx="12"/>' +
+        [230, 670].map(function (x) {
+            return '<g class="fsc-pedals" transform="translate(' + x + ' 266)" data-pedal-station>' +
+                '<g data-rudder-pair>' + ['left','right'].map(function (side,index) {
+                    var px=index ? 10 : -34;
+                    return '<rect class="fsc-pedal-base" x="'+px+'" y="0" width="24" height="40" rx="'+detailRadius+'"/>' +
+                        '<rect class="fsc-pedal-reference" data-pedal-target="'+side+'" x="'+px+'" y="0" width="24" height="40" rx="'+detailRadius+'"/>' +
+                        '<rect class="fsc-pedal-input" data-pedal-input="'+side+'" x="'+px+'" y="0" width="24" height="40" rx="'+detailRadius+'"/>';
+                }).join('') + '<title data-rudder-title></title></g>' +
+                '<g data-brake-graphic="leftBrake" transform="translate(-57 0)"></g>' +
+                '<g data-brake-graphic="rightBrake" transform="translate(57 0)"></g></g>';
+        }).join('') +
+        [230, 670].map(function (x) {
+            var path = '<path d="M-43 -26L-46 4Q0 22 46 4L43 -26M0 13V40"/>' +
+                '<rect class="fsc-yoke-hub" x="-14" y="-1" width="28" height="28" rx="'+detailRadius+'"/>';
+            return '<g transform="translate(' + x + ' 364)"><g class="fsc-yoke-base">' + path + '</g><g class="fsc-yoke-target" data-yoke-target>' + path + '</g>' +
+                '<g class="fsc-yoke-input" data-yoke-input>' + path + '</g></g>';
+        }).join('') +
+        '<text class="fsc-group-label" x="230" y="466">STEERING</text>' +
+        '<text class="fsc-group-owner" x="225" y="368" data-owner="steering">Unconfirmed</text>' +
+        '<text class="fsc-group-summary" x="535" y="347" data-summary="steering">Waiting for simulator</text>' +
+        '<text class="fsc-group-summary" x="535" y="368" data-hint="steering"></text>' +
+        '<g data-roll-graphic transform="translate(181 426)"></g>' +
+        '<g data-pitch-graphic transform="translate(621 426)"></g></g>' +
+        '<g class="fsc-control fsc-unconfirmed" data-control="quadrant" role="button" tabindex="0" aria-disabled="true" aria-label="Assign engine quadrant to Me">' +
+        '<title>Throttle, RPM and mixture are separate controls. Select Me to request control; double-click a pair to force takeover.</title>' +
+        '<rect class="fsc-quadrant-shell" x="366" y="250" width="168" height="236" rx="12"/>' +
+        '<g data-quadrant-axes></g>' +
+        '<text class="fsc-group-label" x="450" y="510">QUADRANT</text>' +
+        '<text class="fsc-group-owner" x="380" y="468" data-owner="quadrant">Unconfirmed</text>' +
+        '<text class="fsc-group-summary" x="380" y="490" data-summary="quadrant">Waiting for simulator</text>' +
+        '<text class="fsc-group-summary" x="380" y="510" data-hint="quadrant"></text></g>' +
+        '<g class="fsc-seat fsc-seat-me" data-seat-choice="me" role="button" tabindex="0" aria-pressed="true" aria-label="Select Me for control assignment">' +
+        '<rect class="fsc-seat-back" x="155" y="493" width="150" height="113" rx="12"/><rect x="147" y="568" width="166" height="45" rx="12"/>' +
+        '<text class="fsc-seat-name" x="230" y="538">ME</text><text class="fsc-seat-sub" x="230" y="560">LEFT PILOT</text>' +
+        '<text class="fsc-seat-selected" x="230" y="598">TAKE CONTROL</text></g>' +
+        '<g class="fsc-seat fsc-seat-mock" data-seat-choice="mock" role="button" tabindex="0" aria-pressed="false" aria-label="Select Mock copilot for control assignment">' +
+        '<rect class="fsc-seat-back" x="595" y="493" width="150" height="113" rx="12"/><rect x="587" y="568" width="166" height="45" rx="12"/>' +
+        '<text class="fsc-seat-name" x="670" y="538">MOCK</text><text class="fsc-seat-sub" x="670" y="560">COPILOT</text>' +
+        '<text class="fsc-seat-selected" x="670" y="598">ASSIGN</text></g>' +
+        [['steering', 'Steering', 150, 355], ['quadrant', 'Engine quadrant', 380, 544]].map(function (entry) {
+            return '<g class="fsc-group-actions" data-menu-for="' + entry[0] + '" transform="translate(' + entry[2] + ' ' + entry[3] + ')" role="button" tabindex="-1" aria-disabled="true" aria-haspopup="menu" aria-expanded="false" aria-label="' + entry[1] + ' actions">' +
+                '<title>' + entry[1] + ' actions: Force takeover</title><rect x="-18" y="-16" width="36" height="32" rx="12"/>' +
+                '<circle cx="-8" cy="0" r="2"/><circle cx="0" cy="0" r="2"/><circle cx="8" cy="0" r="2"/></g>';
+        }).join('') +
+        '</g></svg>';
+
+    function settings(group, title) {
+        return '<section class="fsc-settings-group" data-settings-group="' + group + '"><h2>' + title + '</h2>' +
+            '<div class="fsc-selector"><button type="button" data-group="' + group + '" data-owner-choice="me" disabled>Me</button>' +
+            '<button type="button" data-group="' + group + '" data-owner-choice="mock" disabled>Mock copilot</button></div>' +
+            '<div class="fsc-pickup-settings"><label>Tolerance <select data-tolerance="' + group + '" disabled>' +
+            (group === 'quadrant' ? '<option value="mixed" disabled hidden>Per pair</option>' : '') +
+            [1, 2, 3, 5, 10, 20, 30].map(value => '<option value="' + value + '"' + (value === 10 ? ' selected' : '') + (value < 10 ? ' hidden' : '') + '>' + (value < 10 ? 'Custom ±' + value + '%' : toleranceName(value)) + '</option>').join('') +
+            '</select></label><button type="button" data-learn="' + group + '" disabled>Relearn inputs</button></div>' +
+            '<p class="fsc-pickup-hint" data-pickup-hint="' + group + '"></p>' +
+            '<p class="fsc-activity">Seen <strong data-seen="' + group + '">0</strong> · Blocked <strong data-blocked="' + group + '">0</strong></p>' +
+            '<p class="fsc-last" data-last="' + group + '"></p><div data-axis-list="' + group + '"></div>' + (group === 'steering' ?
+            '<div data-force-button hidden><h3>Force takeover button</h3><p class="fsc-storage">Choose a dedicated hardware button. It takes Steering immediately, including when the tablet is closed.</p>' +
+            '<label>Controller <select data-force-device></select></label> <button type="button" data-force-binding="listen">Assign button</button> ' +
+            '<button type="button" data-force-binding="cancel" hidden>Cancel assignment</button> <button type="button" data-force-binding="clear">Remove binding</button>' +
+            '<p class="fsc-storage" data-force-binding-status role="status" aria-live="polite"></p></div>' : '') + '</section>';
+    }
+    function connectionChoices(key, title, choices) {
+        return '<div class="fsc-connection-choice-field"><span>' + title + '</span>' +
+            '<input type="hidden" data-connection-field="' + key + '">' +
+            '<div class="fsc-connection-choices" role="group" aria-label="' + title + '">' +
+            choices.map(choice => '<button type="button" data-connection-choice="' + key + '" data-choice-value="' + choice[0] + '" aria-pressed="false">' + choice[1] + '</button>').join('') + '</div></div>';
+    }
     function mount(element, controller, options) {
         options = options || {};
-        element.innerHTML = '<div class="fsc-controls">' +
-            '<header class="fsc-header"><div><p class="fsc-eyebrow">FS COPILOT</p><h1>Cockpit controls</h1></div>' +
-            '<span class="fsc-connection" data-connection>Waiting for bridge</span></header>' +
-            (options.preview ? '<p class="fsc-preview">Browser preview. These buttons do not affect simulator hardware.</p>' : '') +
-            '<p class="fsc-intro">Assign a group to the mock copilot, then move your hardware to test that the aircraft no longer responds.</p>' +
-            '<div class="fsc-main"><div class="fsc-overview">' + cockpit +
-            '<p class="fsc-caption">One owner for steering.<br>One owner for the complete engine quadrant.</p></div>' +
-            '<div class="fsc-cards">' +
-            card('steering', 'Steering', 'Yoke, rudder, nosewheel, brakes and trim') +
-            card('quadrant', 'Engine quadrant', 'Both throttles, propellers and mixtures') +
-            '</div></div>' +
+        var selected = null;
+        var resetConfirm = false;
+        var assignmentRequests = new Map(), cancelledRequests = new Set(), flushingCancellation = false, queuedForce = null;
+        var connectionRevision = -1;
+        var connectionDirty = false;
+        var localCode = Math.floor(Math.random() * 4294967296).toString(16).padStart(8, '0');
+        var menuGroup = null, menuSession = null, menuAnchor = null;
+        var hovered = null, heldPress = null, holdTimer = null, suppressedClick = null;
+        element.innerHTML = '<div class="fsc-controls"><div class="fsc-overview">' +
+            (options.preview ? '<span class="fsc-preview">PREVIEW · DISCONNECTED</span>' : '') + cockpit + '</div>' +
+            '<div class="fsc-cancel-row"><button type="button" data-cancel="steering" hidden>Cancel steering takeover</button>' +
+            '<button type="button" data-cancel="quadrant" hidden>Cancel quadrant takeover</button>' +
+            pairs.map(group => '<button type="button" data-cancel="' + group + '" hidden>Cancel ' + titles[group] + '</button>').join('') + '</div>' +
             '<p class="fsc-error" data-error role="alert" hidden></p>' +
-            '<footer class="fsc-footer"><button class="fsc-restore" type="button" data-restore disabled>Restore both to Me</button>' +
-            '<p>Restoring Me reconnects controls immediately at the hardware\'s current position.</p></footer>' +
-            '<p class="fsc-note">This test blocks standard simulator control events, including keyboard or cockpit actions using the same events. ' +
-            'If a control still moves, note its event below and report it. The mock copilot does not fly the aircraft.</p></div>';
+            '<footer class="fsc-footer"><span class="fsc-connection" data-connection>Waiting for bridge</span>' +
+            '<span class="fsc-assignment" data-assignment>Assign to Me · tap controls</span>' +
+            '<span class="fsc-legend"><i></i> Hardware <b></b> Cockpit</span>' +
+            '<button type="button" data-cycle-tolerance disabled title="Applies to all controls: Tight ±10%, Medium ±20%, Loose ±30%">Tolerance</button>' +
+            '<button type="button" data-settings aria-expanded="false">Setup</button></footer>' +
+            '<div class="fsc-context-menu" data-control-menu role="menu" aria-label="Control actions" hidden>' +
+            '<span data-menu-title></span><button type="button" data-force role="menuitem">Force takeover</button>' +
+            '<button type="button" data-check-output role="menuitem" hidden>Check shared output</button>' +
+            '<button type="button" data-auto role="menuitemcheckbox" aria-checked="false" hidden>Auto takeover: off</button>' +
+            '<button type="button" data-advanced role="menuitem" hidden>Advanced engine controls</button>' +
+            pairs.map(group => '<button type="button" data-menu-pair="' + group + '" role="menuitem" hidden>' + titles[group] + ' actions…</button>').join('') +
+            '<small data-menu-help hidden></small></div>' +
+            '<section class="fsc-setup" data-setup role="dialog" aria-label="Control setup and diagnostics" hidden>' +
+            '<div class="fsc-setup-header"><h2>Setup</h2><button type="button" data-close-settings>Close</button></div>' +
+            '<div class="fsc-setup-body" data-setup-scroll tabindex="0" aria-label="Scrollable control settings">' +
+            '<p class="fsc-note" data-output-check hidden></p>' +
+            '<p data-auto-recovery hidden>Automatic quadrant takeover is paused for recovery. <button type="button" data-resume-auto>Resume automatic takeover</button></p>' +
+            '<section class="fsc-wizard" data-wizard hidden aria-label="Shared output setup wizard">' +
+            '<button type="button" data-wizard-start>Setup wizard</button>' +
+            '<button type="button" data-setup-reset hidden>Reset setup</button>' +
+            '<p class="fsc-storage" data-wizard-ready></p><div class="fsc-wizard-results" data-wizard-results></div>' +
+            '<p class="fsc-storage" data-setup-reset-reason hidden></p>' +
+            '<div data-setup-reset-confirm hidden><p>Clear learned controls and saved checks for this aircraft? Connection settings, tolerance and your Force button are kept. Controls stay on Me.</p>' +
+            '<button type="button" data-setup-reset-yes>Clear setup</button> <button type="button" data-setup-reset-no>Cancel</button></div>' +
+            '<h3 data-wizard-title hidden></h3><p data-wizard-instruction role="status" aria-live="polite"></p>' +
+            '<div class="fsc-wizard-actions">' +
+            '<button type="button" data-wizard-cancel hidden>Cancel wizard</button>' +
+            '<button type="button" data-wizard-force hidden>Force takeover this group</button></div><div data-wizard-axes></div></section>' +
+            '<section class="fsc-shared-settings" data-connection-settings hidden><h2>Shared cockpit</h2>' +
+            '<div class="fsc-connection-fields">' +
+            '<label>Your code<input data-connection-field="local" maxlength="8" spellcheck="false" autocomplete="off" aria-label="Your connection code"></label>' +
+            '<label>Friend’s code<input data-connection-field="peer" maxlength="8" spellcheck="false" autocomplete="off" aria-label="Friend connection code"></label>' +
+            connectionChoices('role', 'Flight', [[1, 'Host flight'], [2, 'Join flight']]) +
+            connectionChoices('seat', 'Your seat', [[1, 'Pilot · left'], [2, 'Copilot · right']]) +
+            '</div><p class="fsc-storage">The host runs the aircraft physics. Either person can use either seat.</p>' +
+            '<details><summary>Server</summary><div class="fsc-connection-fields">' +
+            '<label>Hostname or IPv4<input data-connection-field="relay" maxlength="127" spellcheck="false" autocomplete="off"></label>' +
+            '<label>Port<input data-connection-field="port" inputmode="numeric" maxlength="5" autocomplete="off"></label></div></details>' +
+            '<p class="fsc-storage" data-connection-validation></p><button type="button" data-save-connection disabled>Save connection</button>' +
+            '<p class="fsc-storage" data-backend-status role="status" aria-live="polite"></p></section>' +
+            '<p class="fsc-storage" data-shared-status hidden></p><button type="button" data-shared-session hidden disabled>Join shared session</button>' +
+            '<section data-cockpit-recovery hidden><h2>Cockpit synchronization</h2><button type="button" data-resync-cockpit disabled>Resync cockpit from host</button>' +
+            '<p class="fsc-storage" data-recovery-status role="status" aria-live="polite"></p></section>' +
+            '<section class="fsc-settings-group" data-instrument-monitor hidden></section>' +
+            '<div data-seat-swap hidden><p class="fsc-storage" data-seat-status role="status" aria-live="polite"></p>' +
+            '<button type="button" data-seat-action="request">Swap seats</button>' +
+            '<button type="button" data-seat-action="accept" hidden>Accept seat swap</button> ' +
+            '<button type="button" data-seat-action="decline" hidden>Decline</button>' +
+            '<button type="button" data-seat-action="cancel" hidden>Cancel seat swap</button></div>' +
+            '<p class="fsc-storage" data-camera-status role="status" aria-live="polite" hidden></p>' +
+            '<section data-altimeters hidden><h2 data-altimeter-title>Altimeters · local</h2><p class="fsc-storage" data-altimeter-status role="status" aria-live="polite">Synchronization unavailable.</p>' +
+            '<p class="fsc-storage" data-altimeter="0"></p><p class="fsc-storage" data-altimeter="1"></p>' +
+            '<button type="button" data-instruments-local hidden disabled>Use local altimeters</button></section>' +
+            '<section class="fsc-settings-group" data-navigation><h2>Flight plan</h2>' +
+            '<p class="fsc-storage">GTN screens and touches stay local. Route copying is not enabled yet.</p>' +
+            '<p class="fsc-storage">The supported GTN setup requires PMS50 GTN750 Premium activated on both PCs and working MSFS 2024 EFB route integration.</p>' +
+            '<p class="fsc-storage">Both pilots may use the shared AP buttons and selectors. Navigation guidance currently comes from the flight host. Selecting the other pilot\'s GTN is not enabled yet.</p>' +
+            '<button type="button" data-read-avionics-route disabled>Read avionics route</button>' +
+            '<p class="fsc-storage" data-navigation-status role="status" aria-live="polite"></p>' +
+            '<p class="fsc-storage" data-navigation-summary></p></section>' +
+            '<p class="fsc-storage" data-mixture-reference></p>' +
+            '<p class="fsc-storage" data-learning-storage></p>' + groups.map(group => settings(group, titles[group])).join('') +
+            '<p class="fsc-note">Select Me, then double-click a control to force takeover. Right-click or press and hold a control for its Force menu. Force bypasses alignment for that group. Mock copilot is a local test.</p></div></section></div>';
 
-        function text(selector, value) { element.querySelector(selector).textContent = value; }
-        function render(state) {
-            var snapshot = state.snapshot;
-            var connection = !state.online ? 'Waiting for bridge' :
-                snapshot.applying || state.pending ? 'Applying change...' : snapshot.ready ? 'Simulator connected' : 'Bridge error';
-            text('[data-connection]', connection);
-            element.querySelector('[data-connection]').className = 'fsc-connection' + (state.usable ? ' fsc-connected' : '');
-            ['steering', 'quadrant'].forEach(function (group) {
-                var known = state.online && snapshot && snapshot.ready;
-                var blocked = snapshot && snapshot[group + 'Blocked'];
-                text('[data-owner="' + group + '"]', known ? (blocked ? 'Mock copilot' : 'Me') : 'Unconfirmed');
-                text('[data-result="' + group + '"]', !known ? 'Waiting for simulator confirmation.' :
-                    blocked ? 'Input mask active. Move hardware and check the aircraft.' : 'Your controls are enabled.');
-                element.querySelector('[data-card="' + group + '"]').className = 'fsc-card' + (known && blocked ? ' fsc-mock' : '');
-                element.querySelector('[data-diagram="' + group + '"]').setAttribute('class', 'fsc-' + group + (known && blocked ? ' fsc-mock' : ''));
-                var choices = element.querySelectorAll('[data-group="' + group + '"]');
-                for (var i = 0; i < choices.length; i++) {
-                    var button = choices[i];
-                    button.disabled = !state.usable;
-                    button.setAttribute('aria-pressed', known && button.getAttribute('data-owner-choice') === (blocked ? 'mock' : 'me') ? 'true' : 'false');
-                }
-                if (snapshot) {
-                    var activity = snapshot[group];
-                    text('[data-seen="' + group + '"]', activity.seen);
-                    text('[data-blocked="' + group + '"]', activity.blocked);
-                    text('[data-last="' + group + '"]', activity.last ? activity.last + ' = ' + activity.value : 'Move a control to identify its event.');
-                }
+        var instrumentMonitor = new root.FscControls.InstrumentMonitor(element.querySelector('[data-instrument-monitor]'));
+        function setText(node, value) { var next = String(value); if (node.textContent !== next) node.textContent = next; }
+        function text(selector, value) { setText(element.querySelector(selector), value); }
+        function connectionDraft() {
+            var value = {};
+            element.querySelectorAll('[data-connection-field]').forEach(field => {
+                var key = field.getAttribute('data-connection-field');
+                value[key] = ['port', 'role', 'seat'].includes(key) ? Number(field.value) : field.value.trim();
             });
-            element.querySelector('[data-restore]').disabled = !state.usable;
-            var error = element.querySelector('[data-error]');
-            error.hidden = !state.error;
-            error.textContent = state.error;
+            return value;
         }
-
+        function renderConnection(snapshot, state) {
+            var settings = snapshot && snapshot.connection;
+            var section = element.querySelector('[data-connection-settings]'); section.hidden = !settings;
+            if (!settings) { connectionRevision = -1; connectionDirty = false; return; }
+            if (connectionRevision !== settings.revision) {
+                var source = settings.revision ? settings : { relay: 'p2p.fscopilot.com', port: 3600, local: localCode, peer: '', role: 1, seat: 1 };
+                element.querySelectorAll('[data-connection-field]').forEach(field => {
+                    var value = String(source[field.getAttribute('data-connection-field')]);
+                    if (field.tagName.toLowerCase() === 'select') {
+                        var choices = Array.from(field.querySelectorAll('option'));
+                        choices.forEach(option => { option.selected = false; });
+                        var chosen = choices.find(option => option.value === value); if (chosen) chosen.selected = true;
+                    }
+                    else field.value = value;
+                });
+                connectionRevision = settings.revision;
+            }
+            var locked = !state.usable || snapshot.shared && ([1, 2, 3].includes(snapshot.shared.phase) || snapshot.shared.holding);
+            element.querySelectorAll('[data-connection-field]').forEach(field => { field.disabled = !!locked; });
+            element.querySelectorAll('[data-connection-choice]').forEach(button => {
+                var field = element.querySelector('[data-connection-field="' + button.getAttribute('data-connection-choice') + '"]');
+                button.disabled = !!locked;
+                button.setAttribute('aria-pressed', String(field.value === button.getAttribute('data-choice-value')));
+            });
+            var draft = connectionDraft();
+            var valid = root.FscControls.validConnectionSettings(draft);
+            connectionDirty = !settings.revision || Object.keys(draft).some(key => draft[key] !== settings[key]);
+            element.querySelector('[data-save-connection]').disabled = !!locked || !valid;
+            text('[data-connection-validation]', locked && snapshot.shared && snapshot.shared.holding ? 'Recover local controls before changing the connection.' :
+                valid ? connectionDirty ? 'Save these changes before joining.' : 'Both players use the same server and each other’s codes. Join below when ready.' : 'Use two different eight-character lowercase codes, a hostname or IPv4, and a port from 1 to 65535.');
+            var messages = ['Start the FS Copilot EFB helper on this PC.', 'Save your connection settings.', 'Helper ready. Join shared controls below.',
+                'Connecting to the other pilot…', 'Confirming control ownership…', 'Shared cockpit connected.', 'Session ended. Recover local controls, then join again.', 'Connection unavailable.'];
+            var codes = ['', 'Shared controls are not enabled in this build. Local control testing remains available.', 'Learn the required controls while Me is active, then join again.',
+                'Could not connect. Check the server and your friend’s code.', 'Session ended. Recover local controls, then join again.', 'Waiting for the simulator and its control bridge.', 'Save the connection again before joining.'];
+            text('[data-backend-status]', codes[settings.code] || messages[settings.backend]);
+        }
+        function controlElement(group) { return element.querySelector('[data-control="' + group + '"], [data-pair-group="' + group + '"]'); }
+        function svg(parent, name, attributes) {
+            var node = element.ownerDocument.createElementNS(ns, name);
+            Object.keys(attributes || {}).forEach(key => node.setAttribute(key, attributes[key]));
+            parent.appendChild(node); return node;
+        }
+        function markGraphic(parent, id, label, length, vertical) {
+            var row = svg(parent, 'g', { 'data-axis-graphic': id, 'data-length': length, 'data-vertical': vertical ? 'true' : 'false' });
+            var caption = svg(row, 'text', { 'class': 'fsc-axis-caption', x: vertical ? 0 : length / 2, y: -10 }); caption.textContent = label;
+            svg(row, 'rect', { 'class': 'fsc-graphic-track', x: vertical ? -3 : 0, y: 0, width: vertical ? 6 : length, height: vertical ? length : 5, rx: 3 });
+            svg(row, 'rect', { 'class': 'fsc-graphic-band', 'data-band': '' });
+            svg(row, 'line', { 'class': 'fsc-graphic-target', 'data-target': '' });
+            svg(row, 'circle', { 'class': 'fsc-graphic-input', r: 5, 'data-input': '' });
+            svg(row, 'text', { 'class': 'fsc-graphic-state', 'data-graphic-state': '', x: vertical ? 0 : length + 12, y: vertical ? length + 21 : 7 });
+            svg(row, 'title', { 'data-graphic-title': '' });
+            return row;
+        }
+        markGraphic(element.querySelector('[data-roll-graphic]'), 'roll', 'ROLL', 98, false);
+        markGraphic(element.querySelector('[data-pitch-graphic]'), 'pitch', 'PITCH', 98, false);
+        element.querySelectorAll('[data-brake-graphic]').forEach(function (holder) {
+            markGraphic(holder, holder.getAttribute('data-brake-graphic'), '', 40, true);
+        });
+        extraAxes.forEach(function (axis, index) {
+            var holder = svg(element.querySelector('[data-extra-axes]'), 'g', { transform: 'translate(' + (177 + index * 60) + ' 179)', 'data-extra': axis[0] });
+            markGraphic(holder, axis[0], axis[1], 40, false);
+        });
+        var quadrantKey = '';
+        function quadrantGraphics(axes) {
+            var engines = Math.max(0, ...axes.map(function (axis) { return /[1-4]$/.test(axis.id) ? Number(axis.id.slice(-1)) : 0; })) || 2;
+            var key = String(engines);
+            if (quadrantKey === key) return;
+            quadrantKey = key;
+            var parent = element.querySelector('[data-quadrant-axes]'); parent.textContent = '';
+            var rows = engines > 2 ? 2 : 1;
+            pairs.forEach(function (kind, type) {
+                var center = 450 + (type - 1) * 52;
+                var pair = svg(parent, 'g', { 'data-pair-group': kind });
+                svg(pair, 'rect', { 'class': 'fsc-pair-hit fsc-hit', x: center - 25, y: 260, width: 50, height: 217, rx: 12 });
+                for (var engineRow = 0; engineRow < rows; engineRow++) {
+                var columns = Math.min(2, engines - engineRow * 2);
+                    for (var engineColumn = 0; engineColumn < columns; engineColumn++) {
+                        var engine = engineRow * 2 + engineColumn + 1;
+                        var x = center + (engineColumn ? 13 : -13);
+                        var holder = svg(pair, 'g', { transform: 'translate(' + x + ' ' + (rows === 1 ? 286 : 281 + engineRow * 86) + ')' });
+                        markGraphic(holder, kind + engine, kind[0].toUpperCase() + engine, rows === 1 ? 134 : 48, true);
+                    }
+                }
+                var owner = svg(pair, 'text', { 'class': 'fsc-pair-owner', x: center, y: 455, 'data-pair-owner': kind });
+                owner.textContent = 'Me';
+                var mode = svg(pair, 'text', { 'class': 'fsc-pair-mode', x: center, y: 472, 'data-pair-mode': kind });
+                mode.textContent = 'MANUAL';
+            });
+        }
+        function requiresAlignment(axis) {
+            return !axis || ['rudder','steering','leftBrake','rightBrake','elevatorTrim','aileronTrim','rudderTrim'].indexOf(axis.id) < 0;
+        }
+        function reason(axis, known, blocked) {
+            if (!known) return 'Unavailable';
+            if (!requiresAlignment(axis)) return 'Transfers with Steering · no alignment needed';
+            if (axis && axis.relative) return !blocked ? 'Relative input · no learning needed' : axis.aligned ?
+                'Ready · relative input' : axis.id === 'rudder' ? 'Center cockpit rudder for takeover' : 'Release cockpit brake for takeover';
+            if (axis && axis.fixed && axis.input === null) return 'Standard input · move control to read position';
+            if (axis && axis.saved) return 'Saved: move control to read position';
+            if (!axis || !axis.calibrated) return blocked ? 'Not learned: return to Me' : 'Learning: pause at two positions';
+            if (axis.input === null) return 'Input outside learned range';
+            if (!axis.fresh) return 'Move axis to refresh';
+            if (axis.target === null) return 'Waiting for cockpit position';
+            return aligned(axis, known) ? 'Aligned' : axis.input < axis.target ? 'Increase input ↑' : 'Decrease input ↓';
+        }
+        function aligned(axis, known) {
+            if (known && axis && !requiresAlignment(axis)) return true;
+            return !!(known && axis && axis.calibrated && axis.fresh && (axis.relative || axis.input !== null) && axis.target !== null && axis.aligned);
+        }
+        function renderGraphic(row, axis, tolerance, known, blocked) {
+            var length = Number(row.getAttribute('data-length'));
+            var vertical = row.getAttribute('data-vertical') === 'true';
+            var matched = aligned(axis, known);
+            row.setAttribute('class', 'fsc-axis-graphic' + (matched ? ' fsc-axis-aligned' : ''));
+            var band = row.querySelector('[data-band]');
+            var target = row.querySelector('[data-target]');
+            var input = row.querySelector('[data-input]');
+            var targetValid = !!(known && axis && axis.target !== null);
+            var inputValid = !!(known && axis && axis.calibrated && axis.fresh && axis.input !== null);
+            band.setAttribute('visibility', targetValid && requiresAlignment(axis) ? 'visible' : 'hidden');
+            target.setAttribute('visibility', targetValid ? 'visible' : 'hidden');
+            input.setAttribute('visibility', inputValid ? 'visible' : 'hidden');
+            if (targetValid) {
+                var low = Math.max(0, axis.target - tolerance) / 100;
+                var high = Math.min(100, axis.target + tolerance) / 100;
+                if (vertical) {
+                    band.setAttribute('x', -7); band.setAttribute('y', (1 - high) * length); band.setAttribute('width', 14); band.setAttribute('height', (high - low) * length);
+                    target.setAttribute('x1', -10); target.setAttribute('x2', 10); target.setAttribute('y1', (1 - axis.target / 100) * length); target.setAttribute('y2', (1 - axis.target / 100) * length);
+                } else {
+                    band.setAttribute('x', low * length); band.setAttribute('y', -3); band.setAttribute('width', (high - low) * length); band.setAttribute('height', 11);
+                    target.setAttribute('x1', axis.target / 100 * length); target.setAttribute('x2', axis.target / 100 * length); target.setAttribute('y1', -5); target.setAttribute('y2', 10);
+                }
+            }
+            if (inputValid) {
+                input.setAttribute('cx', vertical ? 0 : axis.input / 100 * length);
+                input.setAttribute('cy', vertical ? (1 - axis.input / 100) * length : 2.5);
+            }
+            var symbol = !known ? '—' : !requiresAlignment(axis) ? '' : axis && axis.saved ? '…' : !axis || !axis.calibrated ? '?' :
+                axis.relative ? matched ? '' : '!' : !inputValid || !targetValid ? '!' : matched ? '' : axis.input < axis.target ? '↑' : '↓';
+            row.querySelector('[data-graphic-state]').textContent = symbol;
+            row.querySelector('[data-graphic-title]').textContent = (axis ? axis.label + ': ' : '') + reason(axis, known, blocked) +
+                (axis && axis.input !== null && axis.target !== null ? ' · hardware ' + axis.input.toFixed(1) + '%, cockpit ' + axis.target.toFixed(1) + '%' : '');
+        }
+        function renderDiagnostics(group, pickup, known, blocked) {
+            var list = element.querySelector('[data-axis-list="' + group + '"]');
+            var present = new Set();
+            var diagnosticAxes = pickup.axes.slice();
+            if (group === 'steering') {
+                [['roll', 'Yoke roll'], ['pitch', 'Yoke pitch'], ['rudder', 'Rudder'], ['leftBrake', 'Left brake'], ['rightBrake', 'Right brake']].forEach(function (entry) {
+                    if (!diagnosticAxes.some(axis => axis.id === entry[0])) diagnosticAxes.push({ id: entry[0], label: entry[1],
+                        input: null, target: null, calibrated: false, fresh: false, aligned: false, undetected: true });
+                });
+                var order = ['roll', 'pitch', 'rudder', 'leftBrake', 'rightBrake'];
+                diagnosticAxes.sort((a, b) => (order.includes(a.id) ? order.indexOf(a.id) : 99) - (order.includes(b.id) ? order.indexOf(b.id) : 99));
+            }
+            diagnosticAxes.forEach(function (axis) {
+                present.add(axis.id);
+                var row = list.querySelector('[data-axis="' + axis.id + '"]');
+                if (!row) {
+                    row = element.ownerDocument.createElement('div'); row.setAttribute('data-axis', axis.id);
+                    row.innerHTML = '<strong data-label></strong><span data-axis-state></span><small data-axis-values></small>'; list.appendChild(row);
+                }
+                row.className = 'fsc-axis' + (aligned(axis, known) ? ' fsc-axis-aligned' : '');
+                setText(row.querySelector('[data-label]'), axis.label);
+                setText(row.querySelector('[data-axis-state]'), axis.undetected ? !known ? 'Waiting for simulator' :
+                    blocked ? 'Input not detected · return to Me to set up' : axis.id === 'leftBrake' || axis.id === 'rightBrake' ?
+                        'Input not detected · move pedal or press brake button' : 'Input not detected · move rudder control' : reason(axis, known, blocked));
+                setText(row.querySelector('[data-axis-values]'), (axis.relative ? 'Local demand ' : 'Hardware ') + (axis.input === null ? '?' : axis.input.toFixed(1) + '%') + ' · Cockpit ' + (axis.target === null ? '?' : axis.target.toFixed(1) + '%'));
+            });
+            Array.from(list.children).forEach(row => { if (!present.has(row.getAttribute('data-axis'))) row.remove(); });
+            diagnosticAxes.forEach(function (axis, index) {
+                var row = list.querySelector('[data-axis="' + axis.id + '"]');
+                if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
+            });
+        }
+        function renderWizard(snapshot, state) {
+            var wizard = snapshot && snapshot.wizard;
+            var panel = element.querySelector('[data-wizard]'); panel.hidden = !wizard;
+            if (!wizard) return;
+            var active = wizard.phase >= 1 && wizard.phase <= 5;
+            var title = titles[wizard.group], check = snapshot.outputCheck;
+            var start = element.querySelector('[data-wizard-start]'); start.hidden = active;
+            start.disabled = !state.online || !wizard.ready || !!state.pending;
+            setText(start, wizard.phase === 7 ? 'Retry setup wizard' : 'Setup wizard');
+            var reset = element.querySelector('[data-setup-reset]'); reset.hidden = wizard.resetReady === undefined;
+            reset.disabled = !state.online || !wizard.resetReady || !!state.pending;
+            var confirm = element.querySelector('[data-setup-reset-confirm]');
+            if (reset.disabled) resetConfirm = false;
+            confirm.hidden = !resetConfirm;
+            element.querySelector('[data-setup-reset-yes]').disabled = reset.disabled;
+            var resetReason = element.querySelector('[data-setup-reset-reason]'); resetReason.hidden = reset.hidden;
+            setText(resetReason, !state.online ? 'Waiting for the control bridge.' : state.pending ? 'Waiting for simulator confirmation.' : wizard.resetReason || 'Reset clears this aircraft’s learned controls and saved checks without restarting MSFS.');
+            text('[data-wizard-ready]', active ? 'Auto is paused. Follow the hardware prompts; other setup controls are locked.' :
+                !state.online ? 'Waiting for the control bridge.' : state.pending ? 'Waiting for simulator confirmation.' :
+                wizard.prerequisite || (check && check.saved === 15 ? 'All four checks are saved. Use Reset setup to start again.' : 'The wizard holds one group, checks a 1% cockpit movement and guides aligned return. Move hardware when asked, then hold still.'));
+            text('[data-wizard-results]', ['steering', 'throttle', 'propeller', 'mixture'].map((group, index) => titles[group] + ': ' +
+                (active && wizard.group === group ? 'In progress' : wizard.phase === 7 && wizard.group === group ? 'Failed' :
+                    check && (check.saved & (1 << index)) ? 'Saved' : check && (check.passed & (1 << index)) ? 'Passed · saving' : 'Still needed')).join(' · '));
+            var heading = element.querySelector('[data-wizard-title]'); heading.hidden = !active && wizard.phase !== 7;
+            setText(heading, title + ' · ' + ({1:'Return to Me', 2:'Move hardware', 3:'Holding controls', 4:'Checking output', 5:'Align to take over', 7:'Setup stopped'}[wizard.phase] || ''));
+            var instruction = wizard.phase === 1 || wizard.phase === 5 ? (wizard.group === 'steering' ? 'Align yoke roll and pitch with the cockpit. Rudder and brakes transfer without matching. Control returns automatically.' : 'Align hardware with the cockpit positions. Control returns automatically.') :
+                wizard.phase === 2 ? (wizard.group === 'steering' ? 'Move roll and pitch, then center the yoke and hold still. Rudder and brakes use fixed simulator mappings; no manual learning or matching. Trims sync separately.' :
+                    'Move each ' + title.toLowerCase() + ' lever and hold still. If learning is needed, pause at two positions.') :
+                wizard.phase === 3 || wizard.phase === 4 ? 'Keep hardware still. Checking a small cockpit movement and restoring the original positions.' :
+                wizard.phase === 6 ? 'Setup complete. Valid results are saved; tested controls are on Me and the original Auto setting is restored.' :
+                wizard.phase === 8 ? 'Wizard cancelled. This group is back on Me and the original Auto setting is restored.' : '';
+            var pickup = snapshot.pickup[wizard.group];
+            var ids = ['roll','pitch','rudder','steering','leftBrake','rightBrake','elevatorTrim','aileronTrim','rudderTrim'];
+            for (var engine = 1; engine <= 4; ++engine) ['throttle','propeller','mixture'].forEach(type => ids.push(type + engine));
+            var failedAxis = pickup.axes.find(axis => ids.indexOf(axis.id) === wizard.axis);
+            var message = wizard.message ? wizard.message + (active ? ' ' + instruction : '') : instruction;
+            if (wizard.phase === 7) message += (check && check.group === wizard.group && check.restored ? ' Original cockpit positions restored.' : '') +
+                (snapshot[wizard.group + 'Blocked'] ? ' This group is held.' : ' This group is on Me.') + (snapshot.autoMask ? '' : ' Auto remains paused.');
+            text('[data-wizard-instruction]', (failedAxis && [5,7].includes(wizard.phase) ? failedAxis.label + ': ' : '') + message);
+            var list = element.querySelector('[data-wizard-axes]'); list.hidden = !active;
+            var present = new Set();
+            pickup.axes.forEach(function (axis) {
+                present.add(axis.id);
+                var row = list.querySelector('[data-wizard-axis="' + axis.id + '"]');
+                if (!row) {
+                    row = element.ownerDocument.createElement('div'); row.className = 'fsc-axis'; row.setAttribute('data-wizard-axis', axis.id);
+                    row.innerHTML = '<strong data-label></strong><span data-state></span><small data-values></small>' +
+                        '<div class="fsc-wizard-track" aria-hidden="true"><i data-range></i><b data-cockpit></b><b data-hardware></b></div>';
+                    list.appendChild(row);
+                }
+                setText(row.querySelector('[data-label]'), axis.label);
+                var needed = wizard.needed & (1 << ids.indexOf(axis.id));
+                row.className = 'fsc-axis' + ((wizard.phase === 2 ? !needed : aligned(axis, state.online)) ? ' fsc-axis-aligned' : '');
+                setText(row.querySelector('[data-state]'), !requiresAlignment(axis) ? 'Automatic · simulator state, no matching' : wizard.phase === 2 ? needed ? !axis.calibrated ? 'Pause at two positions' : requiresAlignment(axis) && wizard.group === 'steering' ? 'Move, then center yoke and hold' : 'Move once, then hold still' : 'Ready' :
+                    reason(axis, state.online, snapshot[wizard.group + 'Blocked']));
+                setText(row.querySelector('[data-values]'), 'Hardware ' + (axis.input === null ? 'unknown' : axis.input.toFixed(1) + '%') + ' · Cockpit ' +
+                    (axis.target === null ? 'unknown' : axis.target.toFixed(1) + '%') + (requiresAlignment(axis) ? ' · Tolerance ' + pickup.tolerance + '%' : ' · Transfers with Steering'));
+                var range = row.querySelector('[data-range]'); range.hidden = axis.target === null || !requiresAlignment(axis);
+                range.style.left = Math.max(0, (axis.target || 0) - pickup.tolerance) + '%';
+                range.style.width = (Math.min(100, (axis.target || 0) + pickup.tolerance) - Math.max(0, (axis.target || 0) - pickup.tolerance)) + '%';
+                ['cockpit','hardware'].forEach(function (kind) {
+                    var dot = row.querySelector('[data-' + kind + ']'), value = axis[kind === 'cockpit' ? 'target' : 'input'];
+                    dot.hidden = value === null || kind === 'hardware' && (!axis.fresh || axis.relative);
+                    dot.style.left = (value || 0) + '%';
+                });
+            });
+            Array.from(list.children).forEach(row => { if (!present.has(row.getAttribute('data-wizard-axis'))) row.remove(); });
+            var cancel = element.querySelector('[data-wizard-cancel]'); cancel.hidden = !active; cancel.disabled = !state.online || !!state.pending;
+            var force = element.querySelector('[data-wizard-force]'); force.hidden = ![1,5,7].includes(wizard.phase) || !snapshot[wizard.group + 'Blocked'];
+            force.disabled = !state.online || snapshot.applying || !!state.pending;
+        }
+        function render(state) {
+            instrumentMonitor.update(state.snapshot, state);
+            var surface = element.querySelector('.fsc-controls');
+            if (selected) surface.setAttribute('data-assignment-owner', selected); else surface.removeAttribute('data-assignment-owner');
+            var navigation=state.navigation;
+            element.querySelector('[data-navigation]').hidden=!navigation || navigation.phase==='unavailable';
+            element.querySelector('[data-read-avionics-route]').disabled=!state.online || !navigation || navigation.phase==='reading';
+            text('[data-navigation-status]',navigation?navigation.message:'');
+            text('[data-navigation-summary]',navigation?navigation.summary:'');
+            var snapshot = state.snapshot;
+            var known = !!(state.online && snapshot && snapshot.ready);
+            var shared = root.FscControls.sharedActive(snapshot);
+            var otherName = shared ? 'Other pilot' : 'Mock copilot';
+            element.querySelector('[data-auto-recovery]').hidden = !known || snapshot.autoMask === 14 || !!(snapshot.wizard && [1,2,3,4,5,7].includes(snapshot.wizard.phase));
+            element.querySelector('[data-resume-auto]').disabled = !state.usable;
+            var sessionButton = element.querySelector('[data-shared-session]');
+            sessionButton.hidden = !(snapshot && snapshot.shared); sessionButton.disabled = !state.usable;
+            var phase = snapshot && snapshot.shared ? snapshot.shared.phase : 0;
+            renderConnection(snapshot, state);
+            if (snapshot && snapshot.connection && ![1, 2, 3].includes(phase)) sessionButton.disabled = !state.usable ||
+                snapshot.shared && snapshot.shared.needsRecovery || connectionDirty || !snapshot.connection.revision || ![2, 6].includes(snapshot.connection.backend);
+            setText(sessionButton, phase === 1 ? 'Cancel join' : shared ? 'Leave shared session' : 'Join shared session');
+            var sessionStatus = element.querySelector('[data-shared-status]'); sessionStatus.hidden = sessionButton.hidden || !!(snapshot && snapshot.connection && phase === 0);
+            setText(sessionStatus, phase === 1 ? 'Waiting for the shared connection. Local controls are unchanged.' :
+                shared ? snapshot.connection && snapshot.connection.code === 5 ? 'Updates delayed. Shared session retained; control changes are waiting.' : 'Shared controls: ownership changes wait for both simulators.' : phase === 4 ?
+                'Shared session ended. Use Me or Force takeover on each control to recover.' : 'Connect FS Copilot with the other pilot, then join shared controls here.');
+            text('[data-seat-choice="mock"] .fsc-seat-name', shared ? 'OTHER' : 'MOCK');
+            text('[data-seat-choice="me"] .fsc-seat-sub', shared ? 'YOU' : 'LEFT PILOT');
+            text('[data-seat-choice="mock"] .fsc-seat-sub', shared ? 'OTHER PILOT' : 'COPILOT');
+            var seatState = snapshot && snapshot.shared;
+            var liveSeat = shared && seatState.seatRevision ? seatState.seat : 0;
+            var rightSeat = liveSeat ? liveSeat === 2 : !!(snapshot && snapshot.connection && snapshot.connection.seat === 2);
+            var swapAvailable = !!(shared && seatState.phase === 3 && seatState.seatRevision);
+            element.querySelector('[data-seat-swap]').hidden = !swapAvailable;
+            var camera = snapshot && snapshot.camera;
+            var baro = snapshot && snapshot.altimeters;
+            element.querySelector('[data-altimeters]').hidden = !baro;
+            var baroFlags = baro && Number.isInteger(baro.nativeFlags) ? baro.nativeFlags : 0;
+            var baroProof = !!(baroFlags & 512), baroBlocked = (baroFlags >> 4) & 3;
+            var baroLocal = !!((baroFlags & 64) && !(baroFlags & 384) && baroProof && !baroBlocked);
+            var baroShared = !!(known && baro && !baro.issue && baro.reported && baro.sharedPhase === 2 && liveSeat &&
+                (baroFlags & 13) === 13 && !(baroFlags & 448) && baroProof && baroBlocked === (liveSeat === 1 ? 2 : 1));
+            var baroState = !known ? 'unconfirmed' : baroFlags & 128 ? 'releasing inputs' : baroLocal ? 'local' :
+                baroFlags & 256 ? 'inputs held' : baroShared ? 'shared' : baro && baro.issue ? 'sync stopped' : baro && baro.reported && [1, 3, 7].includes(baro.sharedPhase) ? 'synchronizing' :
+                baro && baro.reported && [4, 5, 6, 8].includes(baro.sharedPhase) ? 'sync stopped' :
+                !(baroFlags & 4) || baroProof && !baroBlocked ? 'local' : 'awaiting confirmation';
+            text('[data-altimeter-title]', 'Altimeters · ' + baroState);
+            text('[data-altimeter-status]', !known ? 'Waiting for fresh simulator status.' : baroFlags & 128 ? 'Waiting for the simulator to release your instrument inputs.' + (shared ? ' Shared flight controls continue.' : '') :
+                baroFlags & 256 ? (baroFlags & 64 ? 'Input release was not confirmed. Retry local recovery.' : 'Instrument inputs are held. Use local altimeters to release your inputs.') :
+                baroLocal ? 'Your instrument inputs are local. Rejoin the shared session to synchronize instruments again.' :
+                baro && baro.issue ? 'Synchronization stopped. Use local altimeters to release your instrument inputs.' :
+                baroShared ? 'Pilot controls the left altimeter; copilot controls the right. Each keeps its own QNH and STD.' :
+                baro && baro.reported && [1, 3, 7].includes(baro.sharedPhase) ? 'Waiting for the simulator to confirm instrument inputs and pressures.' :
+                !(baroFlags & 4) ? 'Synchronization unavailable for this aircraft. Instrument readings are shown below.' : 'Waiting for confirmed instrument ownership.');
+            var localButton = element.querySelector('[data-instruments-local]');
+            localButton.hidden = !baro || !(baroFlags & 2) || !(baroFlags & 304) && !(baro.reported && [1, 2, 3, 4, 7].includes(baro.sharedPhase));
+            localButton.disabled = !controller.canUseLocalInstruments();
+            localButton.textContent = baroFlags & 128 ? 'Releasing inputs…' : baroFlags & 64 ? 'Retry local recovery' : 'Use local altimeters';
+            element.querySelectorAll('[data-altimeter]').forEach(function (row) {
+                var index = Number(row.getAttribute('data-altimeter'));
+                var name = baroFlags & 4 ? (index ? 'Copilot · right' : 'Pilot · left') : 'Altimeter ' + (index + 1);
+                var owner = baroShared ? (index + 1 === liveSeat ? ' · Me' : ' · Other pilot') : '';
+                var input = Number.isInteger(baro && baro.nativeFlags) ? !known || !baroProof ? ' · Input unconfirmed' :
+                    baroBlocked & (1 << index) ? ' · Input held' : ' · Input local' : '';
+                row.setAttribute('data-instrument-owner', baroShared ? (index + 1 === liveSeat ? 'me' : 'other') : 'local');
+                setText(row, name + owner + ': ' + (!known || !baro || !baro.fresh ? 'Waiting for readings' :
+                    'Tuned ' + (baro.pressure16[index] / 16).toFixed(2) + ' hPa · STD ' + (baro.standard[index] ? 'on' : 'off')) + input);
+            });
+            var ordinary = snapshot && snapshot.cockpit;
+            var recovery = ordinary && ordinary.recovery;
+            element.querySelector('[data-cockpit-recovery]').hidden = !ordinary || !ordinary.available;
+            element.querySelector('[data-resync-cockpit]').disabled = !state.usable || !ordinary || !ordinary.sharing || recovery && [1,2].includes(recovery.phase);
+            text('[data-recovery-status]', !ordinary || !ordinary.sharing ? 'Available during a shared session. The host provides the recovery baseline.' :
+                !recovery || !recovery.phase ? 'Compare shared instruments with the host and repair differences. Ownership and local GTN pages stay unchanged.' :
+                (['','Requesting fresh host readings…','Resyncing…','Resync complete.','Resync needs attention.'][recovery.phase]) + ' Checked ' + recovery.checked +
+                ' · corrected ' + recovery.corrected + ' · pending ' + recovery.pending + ' · failed ' + recovery.failed + ' · unavailable ' + recovery.unavailable +
+                (recovery.issues ? '. ' + recovery.issues : ''));
+            var binding = snapshot && snapshot.forceButton;
+            element.querySelector('[data-force-button]').hidden = !binding;
+            if (binding) {
+                var deviceSelect = element.querySelector('[data-force-device]'), savedChoice = deviceSelect.value;
+                var listKey = JSON.stringify(binding.devices);
+                if (deviceSelect.getAttribute('data-devices') !== listKey) {
+                    deviceSelect.innerHTML = '';
+                    binding.devices.forEach(function(device) { var option = element.ownerDocument.createElement('option'); option.value = String(device.id); option.textContent = device.name + ' (' + device.id + ')'; deviceSelect.appendChild(option); });
+                    if (binding.devices.some(d => String(d.id) === savedChoice)) deviceSelect.value = savedChoice;
+                    deviceSelect.setAttribute('data-devices', listKey);
+                }
+                deviceSelect.disabled = !state.usable || binding.listening;
+                element.querySelectorAll('[data-force-binding]').forEach(function(button) {
+                    var action = button.getAttribute('data-force-binding');
+                    button.hidden = action === 'cancel' ? !binding.listening : binding.listening;
+                    button.disabled = !state.usable || action === 'listen' && !binding.devices.length || action === 'clear' && !binding.saved;
+                });
+                text('[data-force-binding-status]', binding.error || (binding.listening ? binding.captured ? 'Release the button to save it.' : 'Press and release the button to assign it. Assignment expires in 30 seconds.' :
+                    !binding.saved ? 'No button assigned.' : binding.name + ' · button ' + binding.button + '. ' + (binding.armed ? 'Ready.' : binding.ready ? 'Press and release once to arm after loading or reconnecting.' : 'Waiting for the controller.')));
+            }
+            if (ordinary && ordinary.available) {
+                text('[data-altimeter-title]', 'Altimeters · ' + (!known ? 'unconfirmed' : ordinary.sharing ? 'shared definitions' : 'local'));
+                text('[data-altimeter-status]', !known ? 'Waiting for fresh simulator status.' : ordinary.result === 4 ?
+                    'An instrument update was not confirmed. Shared flight controls continue; collect the helper logs for details.' :
+                    ordinary.sharing ? 'Both altimeters are shared normally. Either pilot can adjust either instrument; each retains its own setting.' :
+                    'Normal instrument definitions are ready. Synchronization starts with the shared session.');
+                localButton.hidden = true;
+                element.querySelectorAll('[data-altimeter]').forEach(function(row) {
+                    var index=Number(row.getAttribute('data-altimeter'));
+                    row.setAttribute('data-instrument-owner',ordinary.sharing?'shared':'local');
+                    setText(row,(index?'Copilot · right':'Pilot · left') + ': ' + (!known || !baro || !baro.fresh ? 'Waiting for readings' :
+                        'Tuned ' + (baro.pressure16[index]/16).toFixed(2) + ' hPa · STD ' + (baro.standard[index]?'on':'off')));
+                });
+            }
+            element.querySelector('[data-camera-status]').hidden = !camera || !camera.seat || !known;
+            text('[data-camera-status]', !camera ? '' : camera.phase === 3 ? (camera.seat === 1 ? 'Pilot view selected.' : 'Copilot view selected.') :
+                camera.phase === 4 ? 'Seat view not confirmed. Select Pilot or Copilot in the simulator camera panel.' : 'Waiting to apply your cockpit seat view.');
+            text('[data-seat-status]', !swapAvailable ? '' : seatState.seatPending >= 3 ? 'Waiting for simulator confirmation before swapping seats.' : seatState.seatPending === 1 ? 'Seat swap requested. Waiting for the other pilot.' :
+                seatState.seatPending === 2 ? 'The other pilot requests a seat swap.' : rightSeat ? 'Your seat: Copilot · right' : 'Your seat: Pilot · left');
+            element.querySelectorAll('[data-seat-action]').forEach(function (button) {
+                var action = button.getAttribute('data-seat-action');
+                button.hidden = !swapAvailable || (action === 'request' ? seatState.seatPending !== 0 : action === 'cancel' ? ![1, 3].includes(seatState.seatPending) :
+                    action === 'decline' ? ![2, 4].includes(seatState.seatPending) : seatState.seatPending !== 2);
+                button.disabled = !state.usable;
+            });
+            element.querySelector('[data-seat-choice="me"]').setAttribute('transform', rightSeat ? 'translate(440 0)' : 'translate(0 0)');
+            element.querySelector('[data-seat-choice="mock"]').setAttribute('transform', rightSeat ? 'translate(-440 0)' : 'translate(0 0)');
+            if (snapshot && snapshot.connection && snapshot.connection.revision) {
+                text('[data-seat-choice="me"] .fsc-seat-sub', rightSeat ? 'YOU · RIGHT' : 'YOU · LEFT');
+                text('[data-seat-choice="mock"] .fsc-seat-sub', rightSeat ? 'OTHER · LEFT' : 'OTHER · RIGHT');
+            }
+            var preset = root.FscControls.commonTolerance(snapshot);
+            var toleranceButton = element.querySelector('[data-cycle-tolerance]');
+            setText(toleranceButton, known ? 'Tolerance: ' + toleranceName(preset) : 'Tolerance');
+            toleranceButton.disabled = !state.usable;
+            toleranceButton.setAttribute('aria-label', known ? 'Tolerance ' + toleranceName(preset) + '. Click for ' + toleranceName(preset === 10 ? 20 : preset === 20 ? 30 : 10) + '. Applies to all controls.' : 'Tolerance unavailable until connected.');
+            text('[data-connection]', !state.online ? 'Waiting for bridge' : snapshot.applying || state.pending ? 'Applying…' : snapshot.ready ? 'Connected' : snapshot.error ? 'Bridge error' : 'Waiting for simulator');
+            element.querySelector('[data-connection]').className = 'fsc-connection' + (known ? ' fsc-connected' : '');
+            text('[data-assignment]', selected ? 'Assign to ' + (selected === 'me' ? 'Me' : shared ? 'Other' : 'Mock') + ' · tap controls' : 'Select a seat, then tap controls');
+            element.querySelectorAll('[data-seat-choice]').forEach(function (seat) { seat.setAttribute('aria-pressed', String(seat.getAttribute('data-seat-choice') === selected)); });
+            text('[data-learning-storage]', !state.online || !snapshot ? 'Waiting for saved control mappings.' :
+                snapshot.learningStorage === 'unavailable' ? 'Saving unavailable. Learning works for this session.' :
+                snapshot.learningStorage === 'waiting' ? 'Waiting for aircraft identity.' : snapshot.learningStorage === 'saving' ? 'Saving learned controls…' :
+                snapshot.learningStorage === 'ready' ? 'Control mappings save automatically for this aircraft between sessions. Move saved controls once to read their current position; no relearning needed.' : 'Mappings remain for this aircraft session.');
+            text('[data-mixture-reference]', known && snapshot.mixtureReference !== 'waiting' ? 'Mixture alignment reference: ' + (snapshot.mixtureReference === 'cockpit' ? 'cockpit levers' : 'standard simulator levers') : 'Waiting for cockpit lever references.');
+            var allAxes = {};
+            var advanced = true;
+            var sharedQuadrant = root.FscControls.sharedGroup(snapshot, 'quadrant');
+            var pairDisplay = !!(advanced || sharedQuadrant && sharedQuadrant.mixed || snapshot && (snapshot.autoMask || snapshot.quadrantMixed || snapshot.quadrantToleranceMixed));
+            quadrantGraphics(snapshot ? snapshot.pickup.quadrant.axes : []);
+            groups.forEach(function (group) {
+                var pickup = snapshot ? snapshot.pickup[group] : { waiting: false, autoEnabled: false, tolerance: 10, axes: [] };
+                var blocked = !!(snapshot && snapshot[group + 'Blocked']);
+                var ownership = root.FscControls.sharedGroup(snapshot, group);
+                var ownerBlocked = ownership ? ownership.owner === 'mock' : blocked;
+                var ownerKnown = known && (!ownership || ownership.owner !== null || ownership.mixed);
+                var mixed = ownership ? ownership.mixed : !!(group === 'quadrant' && snapshot && snapshot.quadrantMixed);
+                var waiting = known && pickup.waiting;
+                var control = controlElement(group);
+                var isPair = pairs.includes(group);
+                var interactive = !isPair || advanced;
+                var alignmentAxes = pickup.axes.filter(requiresAlignment);
+                var count = alignmentAxes.filter(axis => aligned(axis, known)).length;
+                control.setAttribute('class', (isPair ? 'fsc-pair ' + (pairDisplay ? 'fsc-pair-visible ' : '') : '') + (interactive ? 'fsc-control ' : '') + (!ownerKnown ? 'fsc-unconfirmed' : mixed ? 'fsc-owner-mixed' : ownerBlocked ? 'fsc-owner-mock' : 'fsc-owner-me') + (waiting || ownership && ownership.transferring ? ' fsc-waiting' : ''));
+                if (isPair) {
+                    if (advanced) control.setAttribute('data-control', group); else control.removeAttribute('data-control');
+                    control.querySelector('.fsc-pair-hit').setAttribute('visibility', pairDisplay ? 'visible' : 'hidden');
+                    text('[data-pair-owner="' + group + '"]', !ownerKnown ? '—' : waiting ? 'WAIT' : ownerBlocked ? shared ? 'Other' : 'Mock' : 'Me');
+                    text('[data-pair-mode="' + group + '"]', group === 'propeller' ? 'RPM' : group === 'throttle' ? 'THR' : 'MIX');
+                    control.querySelectorAll('.fsc-pair-owner,.fsc-pair-mode').forEach(node => node.setAttribute('visibility', pairDisplay ? 'visible' : 'hidden'));
+                }
+                control.setAttribute('role', !interactive || group === 'quadrant' && advanced ? 'group' : 'button');
+                control.setAttribute('aria-disabled', String(!state.usable));
+                if (waiting || ownership && ownership.transferring) control.setAttribute('data-pending-owner', waiting ? 'me' : assignmentRequests.has(group) && selected ? selected : ownerBlocked ? 'mock' : 'me');
+                else control.removeAttribute('data-pending-owner');
+                control.setAttribute('tabindex', state.usable && interactive && !(group === 'quadrant' && advanced) ? '0' : '-1');
+                control.setAttribute('aria-haspopup', 'menu');
+                control.setAttribute('aria-expanded', String(menuGroup === group));
+                var actions = element.querySelector('[data-menu-for="' + group + '"]');
+                if (actions) {
+                actions.setAttribute('aria-disabled', String(!state.usable));
+                actions.setAttribute('tabindex', '-1'); actions.setAttribute('aria-hidden','true');
+                actions.setAttribute('aria-expanded', String(menuGroup === group));
+                }
+                control.setAttribute('aria-label', titles[group] + ': ' + (!ownerKnown ? 'unconfirmed' : mixed ? 'mixed owners' : ownerBlocked ? otherName : 'Me') + (selected ? '. Assign to ' + (selected === 'me' ? 'Me' : otherName) : '. Select a seat to assign.'));
+                if (!isPair) {
+                text('[data-owner="' + group + '"]', !ownerKnown ? 'Unconfirmed' : waiting ? 'Me requested' : ownerBlocked ? otherName : 'Me');
+                if (mixed) text('[data-owner="quadrant"]', 'Mixed owners');
+                text('[data-summary="' + group + '"]', !known ? 'Waiting for simulator' : waiting && pickup.automation ? 'Autopilot on' : waiting && snapshot.applying ? 'Confirming takeover…' : waiting ? count + '/' + alignmentAxes.length + ' aligned · ±' + pickup.tolerance + '%' : '±' + pickup.tolerance + '% · ' + (blocked ? 'Hardware blocked' : 'Hardware active'));
+                var unlearned = alignmentAxes.some(axis => !axis.calibrated);
+                var stale = alignmentAxes.some(axis => axis.calibrated && !axis.fresh);
+                text('[data-hint="' + group + '"]', !known ? '' : pickup.automation ? 'AP off for steering pickup' : alignmentAxes.some(axis => axis.saved) ? 'Saved: move controls once' : unlearned ? blocked ? 'Actions menu: Force takeover' : 'Move + pause twice to learn' : stale ? 'Move controls to refresh' : waiting ? group === 'steering' ? 'Match yoke roll and pitch only' : 'Match dots to white marks' : count + '/' + alignmentAxes.length + ' aligned');
+                if (advanced && group === 'quadrant') {
+                    text('[data-summary="quadrant"]', 'Auto ' + (snapshot && snapshot.autoMask ? 'on' : 'off'));
+                    text('[data-hint="quadrant"]', 'Tap engine pairs · ⋯ for Auto');
+                } else if (known && group === 'quadrant' && pairDisplay) {
+                    text('[data-summary="quadrant"]', snapshot.autoMask ? 'Auto · independent pairs' : 'Manual · mixed controls');
+                    text('[data-hint="quadrant"]', 'Tap quadrant to claim all');
+                }
+                }
+                var unlearned = pickup.axes.some(axis => !axis.calibrated);
+                element.querySelector('[data-settings-group="' + group + '"]').hidden = isPair ? !advanced : group === 'quadrant' && advanced;
+                var cancel = element.querySelector('[data-cancel="' + group + '"]'); cancel.hidden = !waiting || isPair && snapshot.pickup.quadrant.waiting; cancel.disabled = !state.usable;
+                element.querySelectorAll('[data-group="' + group + '"]').forEach(function (button) {
+                    var owner = button.getAttribute('data-owner-choice');
+                    button.disabled = !state.usable;
+                    button.className = owner === 'me' && waiting ? 'fsc-pickup-waiting' : '';
+                    button.textContent = owner === 'me' ? waiting ? 'Me — waiting' : 'Me' : waiting ? 'Cancel takeover' : otherName;
+                    button.setAttribute('aria-pressed', String(ownerKnown && !mixed && owner === (ownerBlocked ? 'mock' : 'me')));
+                });
+                var select = element.querySelector('[data-tolerance="' + group + '"]');
+                var mixedTolerance = group === 'quadrant' && snapshot && snapshot.quadrantToleranceMixed;
+                Array.from(select.querySelectorAll('option')).forEach(option => {
+                    var chosen = mixedTolerance ? option.value === 'mixed' : Number(option.value) === pickup.tolerance;
+                    if (option.value === 'mixed') option.hidden = !mixedTolerance;
+                    else if (Number(option.value) < 10) option.hidden = !chosen;
+                    if (option.selected !== chosen) option.selected = chosen;
+                }); select.disabled = !state.usable;
+                element.querySelector('[data-learn="' + group + '"]').disabled = !state.usable || blocked || mixed || shared;
+                if (snapshot) {
+                    text('[data-seen="' + group + '"]', snapshot[group].seen); text('[data-blocked="' + group + '"]', snapshot[group].blocked);
+                    text('[data-last="' + group + '"]', snapshot[group].last ? snapshot[group].last + ' = ' + snapshot[group].value : 'No control events yet');
+                }
+                text('[data-pickup-hint="' + group + '"]', pickup.axes.some(axis => axis.saved) ? 'Mappings loaded. Move controls once to read their current position.' : blocked && unlearned ? 'Open this control\'s three-dot menu and choose Force takeover to return to Me before learning.' : 'New mappings: pause at two separated positions. White marks show cockpit position.');
+                renderDiagnostics(group, pickup, known, blocked);
+                if (!isPair || advanced) pickup.axes.forEach(axis => { allAxes[axis.id] = axis; });
+            });
+            element.querySelectorAll('[data-axis-graphic]').forEach(function (row) {
+                var id = row.getAttribute('data-axis-graphic'); var group = /[1-4]$/.test(id) ? id.slice(0, -1) : 'steering';
+                var pickup = snapshot && snapshot.pickup[group];
+                renderGraphic(row, allAxes[id], pickup ? pickup.tolerance : 10, known, snapshot && snapshot[group + 'Blocked']);
+            });
+            extraAxes.forEach(function (axis) { element.querySelector('[data-extra="' + axis[0] + '"]').setAttribute('visibility', allAxes[axis[0]] ? 'visible' : 'hidden'); });
+            ['input', 'target'].forEach(function (kind) {
+                var roll = allAxes.roll, pitch = allAxes.pitch;
+                var visible = known && roll && pitch && roll[kind] !== null && pitch[kind] !== null && (kind === 'target' || roll.calibrated && pitch.calibrated && roll.fresh && pitch.fresh);
+                element.querySelectorAll('[data-yoke-' + kind + ']').forEach(function (yoke) {
+                    yoke.setAttribute('visibility', visible ? 'visible' : 'hidden');
+                    yoke.setAttribute('transform', visible ? 'translate(0 ' + ((pitch[kind] - 50) * 0.28) + ') rotate(' + ((roll[kind] - 50) * 0.85) + ')' : '');
+                });
+            });
+            renderPedals(allAxes.rudder, known, snapshot && snapshot.steeringBlocked);
+            if (menuGroup && (!state.usable || snapshot.session !== menuSession)) closeMenu(false);
+            var check = snapshot && snapshot.outputCheck;
+            renderWizard(snapshot, state);
+            var checkText = '';
+            if (check && check.available) {
+                var passedChecks = [1, 2, 4, 8].filter(bit => check.passed & bit).length;
+                var remaining = ['steering', 'throttle', 'propeller', 'mixture'].filter((group, index) => !(check.passed & (1 << index))).map(group => titles[group]);
+                var progress = 'Shared output checks: ' + passedChecks + '/4.';
+                var needed = remaining.length ? ' Still needed: ' + remaining.join(', ') + '.' : '';
+                var checking = [1, 2, 3].includes(check.phase);
+                checkText = checking ? 'Checking ' + titles[check.group] + ' output. Keep the hardware still.' :
+                    check.writable === false ? 'Simulator output unavailable. Recover held controls with Force takeover, then restart MSFS before retrying.' :
+                    check.phase === 5 ? (
+                        check.restored ? 'Output check failed; original cockpit position restored.' : 'Output check stopped. Use this control\'s Force takeover if needed.') :
+                    !remaining.length ? progress + (check.saved === 15 ? ' Complete and saved for this aircraft.' : ' Complete for this session.') :
+                    progress + needed + ' Park with brake set and AP off. Assign a missing group to Mock → its ⋯ menu → Check shared output. Auto pauses while the check moves 1% and restores.';
+                if (checking || check.phase === 5 || check.writable === false) checkText += needed;
+                if (check.storage === 'unavailable') checkText += ' Could not save validation; results will not survive a restart.';
+            }
+            var checkStatus = element.querySelector('[data-output-check]'); checkStatus.hidden = !checkText; checkStatus.textContent = checkText;
+            if (snapshot && snapshot.wizard && check && check.available && check.passed !== 15)
+                setText(checkStatus, progress + needed + (snapshot.wizard.phase >= 1 && snapshot.wizard.phase <= 5 ? ' Follow the Setup wizard below.' : ' Use Setup wizard to complete the missing checks automatically.'));
+            var notice = state.error || (check && check.phase === 5 ? checkText : '') || (snapshot && snapshot.shared && snapshot.shared.phase === 4 && snapshot.shared.holding ?
+                'Shared link ended. Use Me or Force takeover on a control to recover it.' : '');
+            var error = element.querySelector('[data-error]'); error.hidden = !notice; error.textContent = notice;
+            if(snapshot)assignmentRequests.forEach(function(owner,group) {
+                var ownership=root.FscControls.sharedGroup(snapshot,group);
+                var inFlight=state.pending && state.pending.operation.indexOf('set|'+group+'|')===0;
+                var completed=ownership ? ownership.owner===owner && !ownership.transferring && (owner!=='me'||ownership.attached) : snapshot[group+'Blocked']===(owner==='mock');
+                if(!inFlight && completed && !snapshot.pickup[group].waiting)assignmentRequests.delete(group);
+            });
+            if (!flushForcedAssignment(state)) flushCancelledAssignments(state);
+        }
+        function renderPedals(axis, known, blocked) {
+            var targetKnown=!!(known && axis && axis.target!==null);
+            var inputKnown=!!(known && axis && axis.calibrated && axis.fresh && axis.input!==null);
+            element.querySelectorAll('[data-rudder-pair]').forEach(function(pair) {
+                pair.setAttribute('class',aligned(axis,known)?'fsc-rudder-aligned':'');
+                ['left','right'].forEach(function(side,index) {
+                    ['target','input'].forEach(function(kind) {
+                        var rect=pair.querySelector('[data-pedal-'+kind+'="'+side+'"]');
+                        var valid=kind==='target'?targetKnown:inputKnown;
+                        rect.setAttribute('visibility',valid?'visible':'hidden');
+                        if(valid)rect.setAttribute('transform','translate(0 '+((axis[kind]-50)/50*(index?12:-12))+')');
+                    });
+                });
+                pair.querySelector('[data-rudder-title]').textContent='Rudder: '+reason(axis,known,blocked);
+            });
+        }
+        function flushForcedAssignment(state) {
+            if (!queuedForce) return false;
+            if (selected!=='me' || !state.online || !state.snapshot || queuedForce.scope!==forceScope(state.snapshot) || Date.now()-queuedForce.at>3000) {queuedForce=null;return false;}
+            if (!state.usable) return false;
+            var group=queuedForce.group;queuedForce=null;assignmentRequests.delete(group);cancelledRequests.delete(group);
+            return controller.forceTakeover(group);
+        }
+        function forceScope(snapshot) { return snapshot.session+'|'+(snapshot.shared && snapshot.shared.session || '')+'|'+(snapshot.shared && snapshot.shared.phase || 0); }
+        function doubleclick(event) {
+            var target=eventTarget(event);
+            if(selected!=='me' || !target || !target.hasAttribute('data-control'))return;
+            var group=target.getAttribute('data-control'),state=controller.state();
+            if(group==='quadrant' || !state.online || !state.snapshot || !state.snapshot.ready)return;
+            event.preventDefault();event.stopPropagation();
+            queuedForce={group:group,scope:forceScope(state.snapshot),at:Date.now()};
+            flushForcedAssignment(state);
+        }
+        function cancelAssignment() {
+            selected = null;
+            queuedForce=null;
+            assignmentRequests.forEach((owner,group) => cancelledRequests.add(group));
+            assignmentRequests.clear();
+        }
+        function flushCancelledAssignments(state) {
+            if (flushingCancellation || !state.usable || !state.snapshot) return;
+            for (const group of cancelledRequests) {
+                cancelledRequests.delete(group);
+                var ownership = root.FscControls.sharedGroup(state.snapshot, group);
+                if (state.snapshot.pickup[group].waiting || ownership && ownership.transferring) {
+                    flushingCancellation = true;
+                    try { controller.cancelTakeover(group); } finally { flushingCancellation = false; }
+                    break; // The next fresh acknowledgement drains the next group.
+                }
+            }
+        }
+        function outsideAssignment(event) {
+            if (!selected) return;
+            var target = event.target;
+            if (target && target.closest && target.closest('[data-cockpit-body]')) return;
+            var resolved = eventTarget(event);
+            if (resolved && (resolved.hasAttribute('data-control') || resolved.hasAttribute('data-seat-choice'))) return;
+            cancelAssignment(); render(controller.state());
+        }
+        function setup(open) {
+            resetConfirm = false;
+            element.querySelector('[data-setup-reset-confirm]').hidden = true;
+            cancelPress(); setHover(null);
+            closeMenu(false);
+            element.querySelector('[data-setup]').hidden = !open;
+            element.querySelector('[data-settings]').setAttribute('aria-expanded', String(open));
+            var focus = element.querySelector(open ? '[data-close-settings]' : '[data-settings]');
+            if (focus.focus) focus.focus();
+        }
+        function actionTarget(target) {
+            while (target && target !== element) {
+                if (target.hasAttribute && (target.hasAttribute('data-monitor-action') || target.hasAttribute('data-force-binding') || target.hasAttribute('data-resync-cockpit') || target.hasAttribute('data-resume-auto'))) return target;
+                if (['data-setup-reset', 'data-setup-reset-yes', 'data-setup-reset-no', 'data-read-avionics-route', 'data-wizard-start', 'data-wizard-cancel', 'data-wizard-force', 'data-seat-choice', 'data-seat-action', 'data-instruments-local', 'data-control', 'data-menu-for', 'data-menu-pair', 'data-advanced', 'data-auto', 'data-cycle-tolerance', 'data-shared-session', 'data-save-connection', 'data-connection-choice', 'data-settings', 'data-close-settings', 'data-force', 'data-check-output', 'data-learn', 'data-owner-choice', 'data-cancel'].some(attribute => target.hasAttribute && target.hasAttribute(attribute))) return target;
+                target = target.parentNode;
+            }
+            return null;
+        }
         function click(event) {
-            var button = event.target;
-            while (button && button !== element && button.tagName !== 'BUTTON') button = button.parentNode;
-            if (!button || button === element || button.disabled) return;
-            if (button.hasAttribute('data-restore')) controller.restore();
-            else controller.setOwner(button.getAttribute('data-group'), button.getAttribute('data-owner-choice'));
+            var target = eventTarget(event);
+            if (suppressedClick && Date.now() <= suppressedClick.until && target === suppressedClick.control) {
+                suppressedClick = null; event.preventDefault(); event.stopPropagation(); return;
+            }
+            if (secondaryButton(event)) { mouseMenu(event); return; }
+            if (!target || !['data-force', 'data-check-output', 'data-menu-pair', 'data-advanced', 'data-auto'].some(key => target.hasAttribute(key))) closeMenu(false);
+            if (!target || target.disabled) return;
+            if (instrumentMonitor.click(target)) return;
+            if (target.hasAttribute('data-seat-choice')) {
+                var choice = target.getAttribute('data-seat-choice');
+                var wasSelected = selected === choice;
+                cancelAssignment(); selected = wasSelected ? null : choice;
+                render(controller.state()); return;
+            }
+            if (target.hasAttribute('data-settings')) { setup(true); return; }
+            if (target.hasAttribute('data-close-settings')) { setup(false); return; }
+            if (target.hasAttribute('data-read-avionics-route')) { controller.inspectAvionicsRoute(); return; }
+            if (target.hasAttribute('data-wizard-start')) { controller.startWizard(); return; }
+            if (target.hasAttribute('data-setup-reset')) {
+                if (target.disabled) return;
+                resetConfirm = true; element.querySelector('[data-setup-reset-confirm]').hidden = false; return;
+            }
+            if (target.hasAttribute('data-setup-reset-no')) { resetConfirm = false; element.querySelector('[data-setup-reset-confirm]').hidden = true; return; }
+            if (target.hasAttribute('data-setup-reset-yes')) {
+                if (controller.resetSetup()) { resetConfirm = false; element.querySelector('[data-setup-reset-confirm]').hidden = true; }
+                return;
+            }
+            if (target.hasAttribute('data-resync-cockpit')) { controller.resyncCockpit(); return; }
+            if (target.hasAttribute('data-resume-auto')) { controller.setAuto(true); return; }
+            if (target.hasAttribute('data-force-binding')) { controller.configureForceButton(target.getAttribute('data-force-binding'), Number(element.querySelector('[data-force-device]').value)); return; }
+            if (target.hasAttribute('data-wizard-cancel')) { controller.cancelWizard(); return; }
+            if (target.hasAttribute('data-wizard-force')) { controller.forceWizardGroup(); return; }
+            if (target.hasAttribute('data-instruments-local')) { controller.useLocalInstruments(); return; }
+            if (!controller.state().usable) return;
+            if (target.hasAttribute('data-connection-choice')) {
+                var field = element.querySelector('[data-connection-field="' + target.getAttribute('data-connection-choice') + '"]');
+                if (field.disabled) return;
+                field.value = target.getAttribute('data-choice-value');
+                render(controller.state()); return;
+            }
+            if (target.hasAttribute('data-shared-session')) { controller.sharedSession(); return; }
+            if (target.hasAttribute('data-seat-action')) { controller.changeSeat(target.getAttribute('data-seat-action')); return; }
+            if (target.hasAttribute('data-save-connection')) { controller.setConnection(connectionDraft()); return; }
+            if (target.hasAttribute('data-cycle-tolerance')) { controller.cycleTolerance(); return; }
+            if (target.hasAttribute('data-check-output')) { var checkGroup = menuGroup; closeMenu(true); controller.checkOutput(checkGroup); return; }
+            if (target.hasAttribute('data-menu-for')) { openMenu(target, null); return; }
+            if (target.hasAttribute('data-menu-pair')) { openMenu(controlElement(target.getAttribute('data-menu-pair')), null); return; }
+            if (target.hasAttribute('data-advanced')) { closeMenu(true); controller.setAdvanced(!controller.state().snapshot.advanced); return; }
+            if (target.hasAttribute('data-auto')) {
+                closeMenu(true); controller.setAuto(!controller.state().snapshot.autoMask); return;
+            }
+            if (target.hasAttribute('data-control')) {
+                var group = target.getAttribute('data-control');
+                var snapshot = controller.state().snapshot;
+                if (group === 'quadrant' || !selected) return;
+                var ownership = root.FscControls.sharedGroup(snapshot, group);
+                if(selected==='me' && snapshot.pickup[group].waiting){assignmentRequests.set(group,'me');return;}
+                if (selected === 'me' && (ownership ? ownership.owner === 'me' && ownership.attached : !snapshot[group + 'Blocked'] && !(group === 'quadrant' && snapshot.quadrantMixed))) return;
+                assignmentRequests.set(group,selected);
+                if (!controller.setOwner(group, selected)) assignmentRequests.delete(group);
+            } else if (target.hasAttribute('data-cancel')) controller.cancelTakeover(target.getAttribute('data-cancel'));
+            else if (target.hasAttribute('data-force')) {
+                suppressedClick = null;
+                var forcedGroup = menuGroup; closeMenu(true);
+                if (forcedGroup) controller.forceTakeover(forcedGroup);
+            }
+            else if (target.hasAttribute('data-learn')) controller.relearn(target.getAttribute('data-learn'));
+            else controller.setOwner(target.getAttribute('data-group'), target.getAttribute('data-owner-choice'));
         }
-        element.addEventListener('click', click);
+        function keydown(event) {
+            if (event.key === 'Escape') {
+                if (menuGroup) { event.preventDefault(); closeMenu(true); }
+                else if (!element.querySelector('[data-setup]').hidden) setup(false);
+                else { cancelAssignment(); render(controller.state()); }
+                return;
+            }
+            if (menuGroup && event.key === 'Tab') { closeMenu(true); return; }
+            if (!element.querySelector('[data-setup]').hidden && event.key === 'Tab') {
+                var fields = Array.from(element.querySelector('[data-setup]').querySelectorAll('button, select, input')).filter(field => !field.disabled && !field.closest('[hidden]') && !field.closest('details:not([open])'));
+                var current = fields.indexOf(element.ownerDocument.activeElement);
+                var next = (current + (event.shiftKey ? -1 : 1) + fields.length) % fields.length;
+                event.preventDefault(); if (fields[next].focus) fields[next].focus(); return;
+            }
+            var target = actionTarget(event.target);
+            if (target && (target.hasAttribute('data-control') || target.hasAttribute('data-menu-for')) && (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10')) {
+                event.preventDefault(); openMenu(target, null); return;
+            }
+            if (target && (target.hasAttribute('data-control') || target.hasAttribute('data-menu-for') || target.hasAttribute('data-seat-choice')) && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); click(event); }
+        }
+        function closeMenu(restoreFocus) {
+            var previous = menuGroup;
+            var anchor = menuAnchor;
+            menuGroup = null; menuSession = null; menuAnchor = null;
+            element.querySelector('[data-control-menu]').hidden = true;
+            if (previous) {
+                var control = controlElement(previous);
+                control.setAttribute('aria-expanded', 'false');
+                var actions = element.querySelector('[data-menu-for="' + previous + '"]'); if (actions) actions.setAttribute('aria-expanded', 'false');
+                if (restoreFocus && anchor && anchor.focus) anchor.focus();
+            }
+        }
+        function openMenu(control, event) {
+            closeMenu(false);
+            if (!controller.state().usable || !element.querySelector('[data-setup]').hidden) return;
+            menuGroup = control.getAttribute('data-control') || control.getAttribute('data-menu-for');
+            menuSession = controller.state().snapshot.session; menuAnchor = control;
+            var menu = element.querySelector('[data-control-menu]');
+            var snapshot = controller.state().snapshot;
+            var title = titles[menuGroup];
+            text('[data-menu-title]', title); menu.setAttribute('aria-label', title + ' actions');
+            var advancedButton = element.querySelector('[data-advanced]'); advancedButton.hidden = true;
+            setText(advancedButton, snapshot.advanced ? 'Simple engine controls' : 'Advanced engine controls');
+            advancedButton.disabled = false;
+            element.querySelectorAll('[data-menu-pair]').forEach(button => { button.hidden = true; });
+            var autoButton = element.querySelector('[data-auto]'); autoButton.hidden = true;
+            var outputButton = element.querySelector('[data-check-output]');
+            outputButton.hidden = true;
+            outputButton.disabled = !snapshot[menuGroup + 'Blocked'] || snapshot.outputCheck && snapshot.outputCheck.writable === false || snapshot.shared && snapshot.shared.phase !== 0;
+            var autoEnabled = !!snapshot.autoMask;
+            autoButton.setAttribute('aria-checked', String(autoEnabled)); setText(autoButton, 'Auto takeover: ' + (autoEnabled ? 'on' : 'off'));
+            var help = element.querySelector('[data-menu-help]');
+            help.hidden = true;
+            setText(help, 'One Auto switch for throttle, RPM and mixture. Movement over 2% requests only that pair; all its levers must align.');
+            menu.hidden = false;
+            controlElement(menuGroup).setAttribute('aria-expanded', 'true');
+            var actions = element.querySelector('[data-menu-for="' + menuGroup + '"]'); if (actions) actions.setAttribute('aria-expanded', 'true');
+            var container = element.querySelector('.fsc-controls');
+            if (container.getBoundingClientRect && menu.getBoundingClientRect) {
+                var box = container.getBoundingClientRect(), size = menu.getBoundingClientRect();
+                var anchor = control.getBoundingClientRect();
+                var x = event ? event.clientX : anchor.left + anchor.width / 2;
+                var y = event ? event.clientY : anchor.bottom;
+                menu.style.left = Math.max(4, Math.min(box.width - size.width - 4, x - box.left)) + 'px';
+                menu.style.top = Math.max(4, Math.min(box.height - size.height - 4, y - box.top)) + 'px';
+            }
+            var button = element.querySelector('[data-force]'); if (button.focus) button.focus();
+        }
+        function contextmenu(event) {
+            var control = eventTarget(event);
+            if (!control || !(control.hasAttribute('data-control') || control.hasAttribute('data-menu-for'))) return;
+            if (control.getAttribute('data-control') === 'quadrant') return;
+            cancelPress(); suppressedClick = {control:control, until:Date.now()+800};
+            event.preventDefault(); event.stopPropagation(); openMenu(control, event);
+        }
+        function secondaryButton(event) { return Number(event.button) === 2 || Number(event.which) === 3 || (Number(event.buttons) & 2) !== 0; }
+        function mouseMenu(event) {
+            // The simulator's embedded UI may deliver mouse buttons without
+            // generating the browser contextmenu event. Support both down/up.
+            if (secondaryButton(event)) contextmenu(event);
+        }
+        // Some embedded views target the entire SVG instead of its <g>/<rect>.
+        // Resolve against the same rendered rectangles, including letterboxing
+        // and seat swaps, without relying on SVG getScreenCTM/getBBox support.
+        function eventPoint(event) {
+            var point = event.touches && event.touches.length ? event.touches[0] : event;
+            return Number.isFinite(point.clientX) && Number.isFinite(point.clientY) ? {clientX:point.clientX,clientY:point.clientY} : null;
+        }
+        function eventTarget(event) {
+            var direct = actionTarget(event.target);
+            if (direct && direct.getAttribute('data-control') !== 'quadrant') return direct;
+            if (!element.querySelector('[data-setup]').hidden) return direct;
+            var graphic = element.querySelector('[data-cockpit]'), point = eventPoint(event);
+            if (!point || !graphic.getBoundingClientRect || !(graphic.contains(event.target) || event.target === element || event.target === graphic.parentNode)) return direct;
+            var box = graphic.getBoundingClientRect(), scale = Math.min(box.width/900,box.height/680);
+            if (!(scale > 0)) return direct;
+            var x = (point.clientX-box.left-(box.width-900*scale)/2)/scale;
+            var y = (point.clientY-box.top-(box.height-680*scale)/2)/scale;
+            var rectangles = graphic.querySelectorAll('[data-seat-choice] > rect, [data-control] > .fsc-hit');
+            for (var i=0;i<rectangles.length;i++) {
+                var rect=rectangles[i], control=rect.parentNode;
+                var translation=/^translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)$/.exec(control.getAttribute('transform') || '');
+                var left=Number(rect.getAttribute('x'))+(translation?Number(translation[1]):0);
+                var top=Number(rect.getAttribute('y'))+(translation?Number(translation[2]):0);
+                if(x>=left && x<=left+Number(rect.getAttribute('width')) && y>=top && y<=top+Number(rect.getAttribute('height')))return control;
+            }
+            return direct;
+        }
+        function setHover(control) {
+            if (control && !(control.hasAttribute('data-seat-choice') || control.hasAttribute('data-control') && control.getAttribute('data-control') !== 'quadrant' && control.getAttribute('aria-disabled') !== 'true')) control=null;
+            if (hovered===control) return;
+            if (hovered) hovered.removeAttribute('data-hovered');
+            hovered=control;
+            if(hovered)hovered.setAttribute('data-hovered','true');
+        }
+        function movePointer(event) {
+            var control=eventTarget(event);setHover(control);
+            var point=eventPoint(event);
+            if(heldPress && (control!==heldPress.control || !point || Math.abs(point.clientX-heldPress.point.clientX)>8 || Math.abs(point.clientY-heldPress.point.clientY)>8))cancelPress();
+        }
+        function cancelPress() {
+            if(holdTimer!==null && root.clearTimeout)root.clearTimeout(holdTimer);
+            holdTimer=null;heldPress=null;
+        }
+        function pressStart(event) {
+            if(secondaryButton(event)){mouseMenu(event);return;}
+            if(event.isPrimary===false || event.touches && event.touches.length!==1 || event.button!==undefined && Number(event.button)!==0)return;
+            var control=eventTarget(event),state=controller.state(),point=eventPoint(event);
+            if(!state.usable || !point || !control || !control.hasAttribute('data-control') || control.getAttribute('data-control')==='quadrant' || !root.setTimeout)return;
+            if(heldPress && heldPress.control===control)return; // pointer + mouse compatibility events share one hold.
+            cancelPress();heldPress={control:control,point:point,scope:forceScope(state.snapshot)};
+            holdTimer=root.setTimeout(function(){
+                var press=heldPress;holdTimer=null;
+                if(!press || !controller.state().usable || forceScope(controller.state().snapshot)!==press.scope){cancelPress();return;}
+                suppressedClick={control:press.control,until:Infinity};heldPress=null;
+                openMenu(press.control,press.point);
+            },650);
+        }
+        function pressEnd(event) {
+            if(suppressedClick && suppressedClick.until===Infinity)suppressedClick.until=Date.now()+800;
+            cancelPress();if(secondaryButton(event))mouseMenu(event);
+        }
+        function leavePointer(){
+            if(suppressedClick && suppressedClick.until===Infinity)suppressedClick.until=Date.now()+800;
+            cancelPress();setHover(null);
+        }
+        function dismissMenu(event) {
+            if (menuGroup && !element.querySelector('[data-control-menu]').contains(event.target)) closeMenu(false);
+        }
+        function input(event) {
+            if (event.target.hasAttribute('data-monitor-filter')) instrumentMonitor.paint();
+            if (event.target.hasAttribute('data-connection-field')) render(controller.state());
+        }
+        function change(event) { if (event.target.hasAttribute('data-tolerance')) controller.setTolerance(event.target.getAttribute('data-tolerance'), Number(event.target.value)); else input(event); }
+        var scrollBody = element.querySelector('[data-setup-scroll]');
+        function scrollBy(amount) {
+            var limit = Math.max(0, scrollBody.scrollHeight - scrollBody.clientHeight);
+            scrollBody.scrollTop = Math.max(0, Math.min(limit, scrollBody.scrollTop + amount));
+        }
+        function wheel(event) {
+            if (element.querySelector('[data-setup]').hidden || !event.deltaY) return;
+            var unit = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? scrollBody.clientHeight : 1;
+            scrollBy(event.deltaY * unit);
+            event.preventDefault(); event.stopPropagation();
+        }
+        var touchY = null;
+        function touchStart(event) { touchY = event.touches.length === 1 ? event.touches[0].clientY : null; }
+        function touchMove(event) {
+            if (touchY === null || event.touches.length !== 1) return;
+            var next = event.touches[0].clientY;
+            scrollBy(touchY - next); touchY = next;
+            event.preventDefault(); event.stopPropagation();
+        }
+        function touchEnd() { touchY = null; }
+        scrollBody.addEventListener('wheel', wheel, { passive: false });
+        scrollBody.addEventListener('touchstart', touchStart, { passive: true });
+        scrollBody.addEventListener('touchmove', touchMove, { passive: false });
+        scrollBody.addEventListener('touchend', touchEnd);
+        element.addEventListener('click', click); element.addEventListener('keydown', keydown); element.addEventListener('change', change);
+        element.addEventListener('input', input);
+        element.addEventListener('contextmenu', contextmenu);
+        element.addEventListener('dblclick', doubleclick);
+        ['mousemove','pointermove','mouseover','pointerover'].forEach(type=>element.addEventListener(type,movePointer));
+        ['mousedown','pointerdown','touchstart'].forEach(type=>element.addEventListener(type,pressStart,true));
+        ['mouseup','pointerup','touchend','pointercancel','touchcancel'].forEach(type=>element.addEventListener(type,pressEnd,true));
+        element.addEventListener('mouseleave',leavePointer);element.addEventListener('pointerleave',leavePointer);
+        element.ownerDocument.addEventListener('pointerdown', dismissMenu);
+        element.ownerDocument.addEventListener('mousedown', dismissMenu);
+        element.ownerDocument.addEventListener('click', outsideAssignment);
         var unsubscribe = controller.subscribe(render);
         return function () {
-            unsubscribe();
-            element.removeEventListener('click', click);
+            cancelPress();setHover(null);
+            unsubscribe(); element.removeEventListener('click', click); element.removeEventListener('keydown', keydown); element.removeEventListener('change', change);
+            element.removeEventListener('input', input);
+            element.removeEventListener('contextmenu', contextmenu); element.ownerDocument.removeEventListener('pointerdown', dismissMenu);
+            element.removeEventListener('dblclick', doubleclick);
+            ['mousemove','pointermove','mouseover','pointerover'].forEach(type=>element.removeEventListener(type,movePointer));
+            ['mousedown','pointerdown','touchstart'].forEach(type=>element.removeEventListener(type,pressStart,true));
+            ['mouseup','pointerup','touchend','pointercancel','touchcancel'].forEach(type=>element.removeEventListener(type,pressEnd,true));
+            element.removeEventListener('mouseleave',leavePointer);element.removeEventListener('pointerleave',leavePointer);
+            element.ownerDocument.removeEventListener('mousedown', dismissMenu);
+            element.ownerDocument.removeEventListener('click', outsideAssignment);
+            scrollBody.removeEventListener('wheel', wheel); scrollBody.removeEventListener('touchstart', touchStart);
+            scrollBody.removeEventListener('touchmove', touchMove); scrollBody.removeEventListener('touchend', touchEnd);
             element.innerHTML = '';
         };
     }
+    root.FscControls = Object.assign(root.FscControls || {}, { mount: mount });
+}(typeof window !== 'undefined' ? window : globalThis));
 
-    root.FscControls.mount = mount;
+(function (root) {
+    'use strict';
+    var MAX_ROUTE = 262144;
+    function canonicalRoute(route) {
+        var nodes = 0;
+        function normalize(value, depth) {
+            if (++nodes > 20000 || depth > 24) throw new Error('Avionics route is too large.');
+            if (value === null || typeof value === 'boolean') return value;
+            if (typeof value === 'number') { if (!Number.isFinite(value)) throw new Error('Avionics route contains a nonfinite number.'); return value; }
+            if (typeof value === 'string') { if (value.length > 4096) throw new Error('Avionics route field is too long.'); return value; }
+            if (Array.isArray(value)) { if (value.length > 2048) throw new Error('Avionics route has too many entries.'); return value.map(item => normalize(item, depth + 1)); }
+            if (typeof value !== 'object') throw new Error('Avionics route contains an unsupported field.');
+            var result = Object.create(null);
+            Object.keys(value).sort().forEach(function (key) {
+                if (['__proto__', 'prototype', 'constructor'].includes(key)) throw new Error('Avionics route contains an invalid property.');
+                if (value[key] !== undefined) result[key] = normalize(value[key], depth + 1);
+            });
+            return result;
+        }
+        if (!route || Array.isArray(route) || typeof route !== 'object' || !('enroute' in route)) throw new Error('Avionics did not return a planned route.');
+        var json = JSON.stringify(normalize(route, 0)).replace(/[\u007f-\uffff]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+        if (json.length > MAX_ROUTE) throw new Error('Avionics route exceeds the transfer limit.');
+        return json;
+    }
+    function identifier(value) {
+        if (typeof value === 'string') return value.trim().slice(0, 32) || '—';
+        if (value && typeof value.ident === 'string') return value.ident || '—';
+        return '—';
+    }
+    function summary(route) {
+        return identifier(route.departureAirport) + ' → ' + identifier(route.destinationAirport) + ' · ' +
+            (Array.isArray(route.enroute) ? route.enroute.length : 0) + ' enroute entries';
+    }
+    class RouteInspector {
+        constructor(environment, options) {
+            this.root = environment; this.options = options || {}; this.listeners = new Set(); this.pending = null; this.manager = null;
+            this.state = { phase: 'idle', message: 'Read the avionics route to check flight-plan access. GTN screens and touches remain local.', summary: '', responses: 0 };
+        }
+        subscribe(callback) { this.listeners.add(callback); callback(this.state); return () => this.listeners.delete(callback); }
+        update(value) { this.state = Object.assign({}, this.state, value); this.listeners.forEach(callback => callback(this.state)); }
+        async connect() {
+            if (this.disposed) throw new Error('Avionics route request cancelled.');
+            if (this.manager) return this.manager;
+            if (this.connecting) return this.connecting;
+            this.connecting = this.open();
+            try { return await this.connecting; }
+            finally { this.connecting = null; }
+        }
+        async open() {
+            var sdk = this.root.msfssdk;
+            // In an EFB view the SDK singleton may wait on aircraft GameState or
+            // its initial EFB-route read. The direct listener needs neither.
+            if (typeof this.root.RegisterViewListener !== 'function' && sdk && sdk.FlightPlanRouteManager && typeof sdk.FlightPlanRouteManager.getManager === 'function') {
+                this.interfaceUsed = 'sdk';
+                var manager = await sdk.FlightPlanRouteManager.getManager();
+                if (this.disposed) throw new Error('Avionics route request cancelled.');
+                var subscription = manager.avionicsRouteRequestResponse.on((sender, response) => this.response(response.route, response.requestId));
+                this.unsubscribe = () => subscription.destroy();
+                return this.manager = { request: () => manager.requestAvionicsRoute(), efb: () => manager.getEfbRoute() };
+            }
+            if (typeof this.root.RegisterViewListener !== 'function') throw new Error('The simulator planned-route interface is unavailable.');
+            this.interfaceUsed = 'listener';
+            return new Promise((resolve, reject) => {
+                var listener;
+                try {
+                    listener = this.root.RegisterViewListener('JS_LISTENER_PLANNEDROUTE', () => Promise.resolve().then(() => {
+                        if (this.disposed) { reject(new Error('Avionics route request cancelled.')); return; }
+                        var handler = (route, id) => this.response(route, id);
+                        listener.on('AvionicsRouteRequestResponse', handler);
+                        this.unsubscribe = () => { if (typeof listener.off === 'function') listener.off('AvionicsRouteRequestResponse', handler); };
+                        this.manager = { request: () => listener.call('REQUEST_AVIONICS_ROUTE'), efb: () => listener.call('GET_EFB_ROUTE') };
+                        resolve(this.manager);
+                    }).catch(reject));
+                } catch (error) { reject(error); }
+            });
+        }
+        response(route, id) {
+            var pending = this.pending;
+            if (!pending || !Number.isSafeInteger(id) || id < 0) return;
+            if (pending.id !== null && pending.id !== id) { ++pending.foreign; return; }
+            if (pending.responses.length >= 64) { pending.finish(new Error('Too many avionics route responses. A source must be identified before copying plans.')); return; }
+            pending.responses.push({ id: id, route: route });
+            if (pending.id !== null) this.settle(pending);
+        }
+        settle(pending) {
+            if (pending.settleTimer) return;
+            pending.settleTimer = this.root.setTimeout(() => {
+                var matches = pending.responses.filter(value => value.id === pending.id);
+                if (!matches.length) { pending.settleTimer = null; return; }
+                try {
+                    var canonical = matches.map(value => canonicalRoute(value.route));
+                    if (new Set(canonical).size !== 1) pending.finish(new Error('Multiple avionics returned different routes. A source must be identified before copying plans.'));
+                    else pending.finish(null, {id:pending.id,route:JSON.parse(canonical[0]),canonical:canonical[0]}, matches.length);
+                } catch (error) { pending.finish(error); }
+            }, this.options.settleMs === undefined ? 750 : this.options.settleMs);
+        }
+        async inspect() {
+            if (this.pending || this.state.phase === 'reading' || this.disposed) return false;
+            this.update({ phase: 'reading', message: 'Requesting the avionics route. No flight plan is being changed.', summary: '', responses: 0 });
+            var attempt;
+            try {
+                var outcome = await new Promise((resolve, reject) => {
+                    var pending = attempt = { id: null, stage: 'listener', foreign: 0, responses: [], settleTimer: null, timeout: null, finish: null };
+                    pending.finish = (error, value, responses) => {
+                        if (this.pending !== pending) return;
+                        this.root.clearTimeout(pending.timeout); if (pending.settleTimer) this.root.clearTimeout(pending.settleTimer);
+                        this.pending = null; error ? reject(error) : resolve({ value: value, responses: responses });
+                    };
+                    this.pending = pending;
+                    pending.timeout = this.root.setTimeout(() => pending.finish(new Error(pending.stage === 'listener' ?
+                        'The simulator route listener did not become ready. No avionics route was requested.' : pending.stage === 'request' ?
+                        'The simulator did not acknowledge the avionics route request.' :
+                        'No avionics answered the route request. Check whether your navigator and its edition support MSFS 2024 EFB route sync.')),
+                        this.options.timeoutMs === undefined ? 8000 : this.options.timeoutMs);
+                    this.connect().then(async manager => {
+                        if (this.pending !== pending) return;
+                        pending.stage = 'request';
+                        pending.id = await manager.request();
+                        if (!Number.isSafeInteger(pending.id) || pending.id < 0) throw new Error('The simulator did not identify the route request.');
+                        pending.stage = 'response';
+                        this.settle(pending);
+                    }).catch(error => pending.finish(error));
+                });
+                var efb = null;
+                var comparisonTimer;
+                try {
+                    var comparison = await Promise.race([this.manager.efb(), new Promise(resolve => {comparisonTimer=this.root.setTimeout(()=>resolve(null),this.options.comparisonMs===undefined?1500:this.options.comparisonMs);})]);
+                    if (comparison) efb=canonicalRoute(comparison);
+                } catch (_) { /* The optional EFB comparison cannot substitute for avionics. */ }
+                finally { if(comparisonTimer)this.root.clearTimeout(comparisonTimer); }
+                if(this.disposed)return false;
+                var same = efb === outcome.value.canonical;
+                this.lastRoute = outcome.value;
+                this.update({ phase: 'observed', summary: summary(outcome.value.route), responses: outcome.responses,
+                    message: same ? 'Avionics returned the same route as the EFB. Compare it with the GTN; this alone does not identify the responding instrument.' :
+                        'Avionics returned a route. Compare its airports and waypoints with the GTN. The API does not identify which instrument answered.' });
+                if (this.options.report) {try {this.options.report(outcome.value.canonical);} catch (_) { /* A diagnostic log failure does not invalidate the read. */ }}
+                return true;
+            } catch (error) {
+                this.update({ phase: 'error', message: error.message || 'The avionics route could not be read.', summary: '', responses: 0 });
+                if (!this.disposed && this.options.reportError) {
+                    var diagnostic = { recordType: 'route-inspection-error', version: 1, interface: this.interfaceUsed || 'unavailable',
+                        stage: attempt ? attempt.stage : 'listener', requestId: attempt ? attempt.id : null,
+                        responses: attempt ? attempt.responses.length : 0, foreignResponses: attempt ? attempt.foreign : 0,
+                        message: this.state.message.slice(0, 500) };
+                    try { this.options.reportError(JSON.stringify(diagnostic).replace(/[\u007f-\uffff]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))); } catch (_) {}
+                }
+                return false;
+            }
+        }
+        dispose() { this.disposed=true;if (this.pending) this.pending.finish(new Error('Avionics route request cancelled.')); if (this.unsubscribe) this.unsubscribe(); this.listeners.clear(); }
+    }
+    root.FscControls = root.FscControls || {};
+    root.FscControls.RouteInspector = RouteInspector;
+    root.FscControls.canonicalRoute = canonicalRoute;
+    if (typeof module !== 'undefined' && module.exports) module.exports = { RouteInspector: RouteInspector, canonicalRoute: canonicalRoute };
 })(typeof window !== 'undefined' ? window : globalThis);
 
 // EFB interface adapter based on the MIT-licensed minimal registration example
@@ -312,7 +1743,7 @@ SOFTWARE.
     'use strict';
     var INTERNAL_NAME = 'FsCopilotControls';
     var BASE_URL = 'coui://html_ui/efb_ui/efb_apps/' + INTERNAL_NAME;
-    var style = ".fsc-controls { box-sizing: border-box; width: 100%; height: 100%; overflow-y: auto; padding: 26px 30px; background: #111b27; color: #eff4fa; font: 17px/1.45 Arial, sans-serif; }\n.fsc-controls * { box-sizing: border-box; }\n.fsc-controls h1, .fsc-controls h2, .fsc-controls p { margin: 0; }\n.fsc-controls h1 { font-size: 31px; font-weight: 600; }\n.fsc-controls h2 { font-size: 22px; font-weight: 600; }\n.fsc-header, .fsc-card-heading, .fsc-main, .fsc-selector, .fsc-activity, .fsc-footer { display: flex; }\n.fsc-header, .fsc-card-heading { align-items: center; justify-content: space-between; }\n.fsc-eyebrow { color: #7fa4c5; font-size: 12px; font-weight: bold; letter-spacing: 3px; }\n.fsc-connection { margin-left: 16px; padding: 8px 13px; border: 1px solid #586779; border-radius: 20px; font-size: 14px; white-space: nowrap; }\n.fsc-connected { color: #9be4c7; border-color: #467c6b; background: #19362f; }\n.fsc-intro { padding-top: 18px; color: #b4c4d4; max-width: 850px; }\n.fsc-main { margin-top: 24px; align-items: stretch; }\n.fsc-overview { width: 42%; padding-right: 26px; text-align: center; }\n.fsc-overview svg { display: block; width: 100%; max-height: 420px; }\n.fsc-cards { width: 58%; }\n.fsc-shell { fill: #182534; stroke: #40546a; stroke-width: 3; }\n.fsc-panel { fill: #293b4e; stroke: #516982; stroke-width: 2; }\n.fsc-window { fill: #243e52; stroke: #7195ac; stroke-width: 2; }\n.fsc-seat rect { fill: #233446; stroke: #47617b; stroke-width: 2; }\n.fsc-seat text { fill: #ebf2fa; text-anchor: middle; font: bold 16px Arial, sans-serif; }\n.fsc-seat text + text { fill: #8eabc3; font-size: 10px; }\n.fsc-steering { stroke: #6bd4b1; stroke-width: 7; fill: #243e3c; }\n.fsc-steering rect { stroke-width: 2; }\n.fsc-steering.fsc-mock { stroke: #edbb76; fill: #4a3928; }\n.fsc-quadrant rect { fill: #233e3a; stroke: #6bd4b1; stroke-width: 2; }\n.fsc-quadrant path { stroke: #91a9bf; stroke-width: 2; }\n.fsc-quadrant.fsc-mock rect { fill: #4a3928; stroke: #edbb76; }\n.fsc-quadrant .fsc-lever-throttle { stroke: #111b27; stroke-width: 8; }\n.fsc-quadrant .fsc-lever-prop { stroke: #629de0; stroke-width: 8; }\n.fsc-quadrant .fsc-lever-mixture { stroke: #ed7d77; stroke-width: 8; }\n.fsc-diagram-label { fill: #7d96ae; text-anchor: middle; font: 11px Arial, sans-serif; letter-spacing: 2px; }\n.fsc-caption { color: #8ea7be; font-size: 14px; }\n.fsc-card { padding: 19px 21px; margin-bottom: 16px; border: 1px solid #344a60; border-radius: 13px; background: #1b2a3b; }\n.fsc-card.fsc-mock { border-color: #a6804f; }\n.fsc-owner { margin-left: 12px; font-size: 13px; color: #a9c0d5; }\n.fsc-description { padding-top: 5px; color: #a9bdd0; font-size: 14px; }\n.fsc-selector { margin-top: 17px; }\n.fsc-controls button { border: 1px solid #516b83; border-radius: 8px; padding: 12px 17px; background: #263b50; color: #edf5fc; font: bold 16px Arial, sans-serif; cursor: pointer; min-height: 48px; }\n.fsc-selector button { width: 50%; }\n.fsc-selector button + button { margin-left: 10px; }\n.fsc-selector button[aria-pressed=\"true\"] { background: #245346; border-color: #70d4b4; }\n.fsc-selector button[data-owner-choice=\"mock\"][aria-pressed=\"true\"] { background: #5b4329; border-color: #edbb76; }\n.fsc-controls button:disabled { opacity: 0.45; cursor: default; }\n.fsc-controls button:focus { outline: 2px solid #b5d9ff; outline-offset: 3px; }\n.fsc-result { min-height: 40px; padding-top: 12px; font-size: 14px; color: #c2d4e2; }\n.fsc-activity { justify-content: space-between; padding-top: 8px; color: #91acc3; font-size: 13px; }\n.fsc-activity strong { color: #eff4fa; margin-left: 7px; }\n.fsc-last { padding-top: 7px; overflow-wrap: break-word; color: #86a5c0; font: 11px/1.5 monospace; }\n.fsc-footer { align-items: center; border-top: 1px solid #2b4054; padding-top: 18px; margin-top: 8px; }\n.fsc-footer p { margin-left: 18px; color: #b2c3d4; font-size: 13px; }\n.fsc-restore { flex-shrink: 0; }\n.fsc-note { padding-top: 17px; color: #8da7bf; font-size: 12px; }\n.fsc-error, .fsc-preview { padding: 12px 16px; margin-top: 15px !important; background: #4d302b; color: #ffd3ad; border-radius: 7px; font-size: 14px; }\n.fsc-controls [hidden] { display: none !important; }\n@media (max-width: 720px) {\n    .fsc-controls { padding: 18px; }\n    .fsc-controls h1 { font-size: 25px; }\n    .fsc-main { display: block; }\n    .fsc-overview, .fsc-cards { width: 100%; padding-right: 0; }\n    .fsc-overview svg { max-height: 240px; }\n    .fsc-caption { display: none; }\n    .fsc-cards { margin-top: 16px; }\n    .fsc-footer { display: block; }\n    .fsc-footer p { margin-left: 0; padding-top: 10px; }\n}\n";
+    var style = ".fsc-controls { --fsc-radius: 12px; --me: #86b5d8; --mock: #d7a06c; --cockpit-line: #40515f; width: 100%; height: 100%; min-height: 0; overflow: hidden; position: relative; display: flex; flex-direction: column; padding: 8px 12px 10px; box-sizing: border-box; background: radial-gradient(ellipse at 50% 35%, #1c2c3a, #111b26 76%); color: #eaf0f5; font: 13px/1.4 Arial, sans-serif; }\n.fsc-controls * { box-sizing: border-box; }\n.fsc-controls p, .fsc-controls h2 { margin: 0; }\n.fsc-controls [hidden] { display: none !important; }\n.fsc-overview { position: relative; flex: 1 1 auto; min-height: 0; }\n.fsc-overview > svg { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }\n.fsc-shell { fill: #182633; stroke: var(--cockpit-line); stroke-width: 2; }\n.fsc-window { fill: #253f50; stroke: #628196; stroke-width: 1.5; }\n.fsc-panel { fill: #243543; stroke: #486071; stroke-width: 1.5; }\n.fsc-control { --owner: #75899b; cursor: pointer; outline: none; }\n.fsc-owner-me { --owner: var(--me); }\n.fsc-owner-mock { --owner: var(--mock); }\n[data-altimeter] { border-left: 3px solid #607587; padding: 6px 9px; border-radius: var(--fsc-radius); }\n[data-altimeter][data-instrument-owner=\"me\"] { border-color: var(--me); background: rgba(167, 197, 227, .1); }\n[data-altimeter][data-instrument-owner=\"other\"] { border-color: var(--mock); background: rgba(225, 170, 167, .1); }\n.fsc-owner-mixed { --owner: #c4b8d8; }\n.fsc-pair-owner, .fsc-pair-mode { text-anchor: middle; font: bold 10px Arial, sans-serif; fill: var(--owner); pointer-events: none; }\n.fsc-pair-mode { font-size: 10px; letter-spacing: .5px; }\n.fsc-group-owner, .fsc-group-summary, .fsc-pair-owner, .fsc-group-actions { display: none; }\n.fsc-pair.fsc-waiting .fsc-pair-owner { fill: #f0d591; }\n.fsc-pair-visible .fsc-graphic-track { fill: var(--owner); fill-opacity: .35; }\n.fsc-pair-visible .fsc-graphic-input { stroke: var(--owner); }\n.fsc-controls[data-assignment-owner=\"me\"] { --assignment: var(--me); }\n.fsc-controls[data-assignment-owner=\"mock\"] { --assignment: var(--mock); }\n.fsc-hit { fill: var(--owner); fill-opacity: .2; stroke: none; pointer-events: all; transition: fill .15s, fill-opacity .15s; }\n.fsc-unconfirmed > .fsc-hit { fill-opacity: 0; }\n.fsc-control:hover > .fsc-hit { fill-opacity: .29; }\n.fsc-control[data-hovered=\"true\"] > .fsc-hit { fill-opacity: .29; }\n.fsc-control:focus-visible > .fsc-hit { fill-opacity: .29; }\n.fsc-controls[data-assignment-owner] .fsc-control[aria-disabled=\"false\"]:hover > .fsc-hit { fill: var(--assignment); fill-opacity: .12; }\n.fsc-controls[data-assignment-owner] .fsc-control[aria-disabled=\"false\"][data-hovered=\"true\"] > .fsc-hit { fill: var(--assignment); fill-opacity: .12; }\n.fsc-controls[data-assignment-owner] .fsc-control[aria-disabled=\"false\"]:focus-visible > .fsc-hit { fill: var(--assignment); fill-opacity: .12; }\n.fsc-control[data-pending-owner=\"me\"] { --waiting-color: var(--me); }\n.fsc-control[data-pending-owner=\"mock\"] { --waiting-color: var(--mock); }\n.fsc-control.fsc-waiting > .fsc-hit { fill: var(--waiting-color, var(--me)); animation: fsc-await-alignment 1s steps(1, end) infinite; }\n@keyframes fsc-await-alignment { 0%, 100% { fill-opacity: .28; } 50% { fill-opacity: 0; } }\n@media (prefers-reduced-motion: reduce) { .fsc-control.fsc-waiting > .fsc-hit { animation: none; fill-opacity: .28; } }\n.fsc-control[aria-disabled=\"true\"] { cursor: default; }\n.fsc-control[aria-disabled=\"true\"] { pointer-events: none; }\n.fsc-pedal-base { fill: var(--owner); fill-opacity: .16; stroke: var(--owner); stroke-width: 1.5; }\n.fsc-pedal-reference { fill: none; stroke: #f5f5ed; stroke-width: 1.5; stroke-dasharray: 3 2; opacity: .75; }\n.fsc-pedal-input { fill: var(--owner); fill-opacity: .3; stroke: var(--owner); stroke-width: 2; }\n.fsc-rudder-aligned .fsc-pedal-input { fill-opacity: .5; }\n.fsc-yoke-base, .fsc-yoke-input { fill: none; stroke: var(--owner); stroke-width: 9; stroke-linecap: round; }\n.fsc-yoke-base { opacity: .32; stroke-width: 7; }\n.fsc-yoke-target { fill: none; stroke: #f5f5ed; stroke-width: 3; stroke-dasharray: 4 3; opacity: .75; }\n.fsc-yoke-base .fsc-yoke-hub, .fsc-yoke-input .fsc-yoke-hub { fill: var(--owner); stroke-width: 3; }\n.fsc-quadrant-shell { fill: #13222e; stroke: var(--cockpit-line); stroke-width: 2; }\n.fsc-control.fsc-waiting .fsc-group-owner { fill: #f0d591; }\n.fsc-group-label, .fsc-group-owner, .fsc-group-summary, .fsc-axis-caption, .fsc-graphic-state { text-anchor: middle; font-family: Arial, sans-serif; pointer-events: none; }\n.fsc-group-label { fill: #c6d3dd; font-size: 13px; font-weight: bold; letter-spacing: 2px; }\n.fsc-group-owner { fill: var(--owner); font-size: 17px; font-weight: bold; }\n.fsc-group-summary { fill: #a7bac9; font-size: 11px; }\n.fsc-unconfirmed { opacity: .65; }\n.fsc-axis-caption { fill: #b6c6d3; font-size: 10px; letter-spacing: .5px; }\n.fsc-graphic-track { fill: #364957; }\n.fsc-graphic-band { fill: #a7c5e3; opacity: .18; }\n.fsc-graphic-target { stroke: #fffdf0; stroke-width: 2.5; }\n.fsc-graphic-input { fill: #c8d1d8; stroke: #172632; stroke-width: 1.5; }\n.fsc-graphic-state { fill: #e7b7ad; font-size: 13px; font-weight: bold; }\n.fsc-axis-aligned .fsc-graphic-input { fill: var(--owner, var(--me)); }\n.fsc-axis-aligned .fsc-graphic-state { fill: var(--owner, var(--me)); }\n.fsc-seat { cursor: pointer; outline: none; }\n.fsc-seat rect { stroke-width: 1.5; }\n.fsc-seat rect { transition: fill .15s, stroke .15s; }\n.fsc-seat-me rect { fill: #526e87; stroke: #7c9db8; }\n.fsc-seat-mock rect { fill: #8c6849; stroke: #b48b65; }\n.fsc-seat-me:hover rect { fill: #698eab; }\n.fsc-seat-me[data-hovered=\"true\"] rect { fill: #698eab; }\n.fsc-seat-me:focus-visible rect { fill: #698eab; }\n.fsc-seat-mock:hover rect { fill: #b48a62; }\n.fsc-seat-mock[data-hovered=\"true\"] rect { fill: #b48a62; }\n.fsc-seat-mock:focus-visible rect { fill: #b48a62; }\n.fsc-seat[aria-pressed=\"true\"] rect { stroke: #fff; stroke-width: 3.5; }\n.fsc-seat text { fill: #eff6f0; text-anchor: middle; font-family: Arial, sans-serif; pointer-events: none; }\n.fsc-seat-mock text { fill: #fff0ec; }\n.fsc-seat-name { font-size: 21px; font-weight: bold; letter-spacing: 2px; }\n.fsc-seat-sub { font-size: 10px; letter-spacing: 1.5px; }\n.fsc-seat-selected { opacity: 0; font-size: 10px; font-weight: bold; letter-spacing: 1.5px; }\n.fsc-seat[aria-pressed=\"true\"] .fsc-seat-selected { opacity: 1; }\n.fsc-group-actions { cursor: pointer; outline: none; }\n.fsc-group-actions rect { fill: #233543; stroke: #6b8294; stroke-width: 1.5; }\n.fsc-group-actions circle { fill: #e8f0f5; pointer-events: none; }\n.fsc-group-actions:hover rect, .fsc-group-actions:focus rect { stroke: #e5d8b8; stroke-width: 2; }\n.fsc-group-actions[aria-disabled=\"true\"] { opacity: .4; cursor: default; }\n.fsc-controls button, .fsc-controls select { border: 1px solid #4a6172; border-radius: var(--fsc-radius); background: #233543; color: #e8f0f5; font: 13px Arial, sans-serif; min-height: 38px; padding: 8px 12px; cursor: pointer; }\n.fsc-controls button:disabled, .fsc-controls select:disabled { opacity: .4; cursor: default; }\n.fsc-controls button:focus, .fsc-controls select:focus { outline: 2px solid #e5d8b8; outline-offset: 2px; }\n.fsc-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 0 0 auto; padding-top: 8px; border-top: 1px solid #334756; }\n.fsc-connection { color: #9cabb8; font-size: 11px; white-space: nowrap; }\n.fsc-connection:before { content: '●'; margin-right: 6px; color: #bfae8d; }\n.fsc-connected:before { color: #a2d5bb; }\n.fsc-assignment { color: #c1ced8; font-size: 11px; flex: 1 1 auto; }\n.fsc-legend { display: inline-flex; align-items: center; gap: 5px; color: #9bafbf; font-size: 10px; }\n.fsc-legend i { width: 7px; height: 7px; border-radius: 50%; background: #edaaa2; }\n.fsc-legend b { width: 2px; height: 12px; background: #fffdf0; margin-left: 4px; }\n.fsc-context-menu { position: absolute; z-index: 20; width: 210px; max-width: calc(100% - 8px); padding: 8px; border: 1px solid #7b8fa0; border-radius: var(--fsc-radius); background: #1b2c3a; box-shadow: 0 6px 22px #0009; }\n.fsc-context-menu > span { display: block; padding: 3px 5px 8px; color: #b1c4d2; font-size: 12px; }\n.fsc-context-menu button { width: 100%; text-align: left; border-color: #9a8068; color: #f2d4b5; }\n.fsc-context-menu button + button { margin-top: 5px; }\n.fsc-context-menu small { display: block; margin: 8px 4px 2px; font-size: 11px; color: #b1c4d2; }\n.fsc-context-menu button[aria-checked=\"true\"], .fsc-settings-group button[aria-pressed=\"true\"][data-auto-setting] { border-color: #a2d5bb; color: #a2d5bb; }\n.fsc-cancel-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; flex: 0 0 auto; }\n.fsc-cancel-row button { min-height: 34px; font-size: 12px; border-color: #a88e52; color: #f0d591; margin-bottom: 6px; }\n.fsc-error { flex: 0 0 auto; padding: 7px 10px; margin-bottom: 6px !important; border: 1px solid #9b6158; border-radius: var(--fsc-radius); background: #4a302e; color: #f8d4c7; font-size: 12px; max-height: 72px; overflow: auto; }\n.fsc-preview { position: absolute; top: 4px; left: 4px; z-index: 1; color: #d3ba8e; font-size: 10px; letter-spacing: 1px; pointer-events: none; }\n.fsc-setup { position: absolute; top: 8px; right: 8px; bottom: 8px; left: 8px; height: calc(100% - 16px); z-index: 10; display: flex; flex-direction: column; overflow: hidden; padding: 16px; border: 1px solid #597185; border-radius: var(--fsc-radius); background: #14222f; box-shadow: 0 10px 30px #0007; }\n.fsc-setup-header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 8px; }\n.fsc-setup-body { flex: 1 1 0; min-height: 0; overflow-y: scroll; overflow-x: hidden; padding-right: 10px; overscroll-behavior: contain; }\n.fsc-setup-body::-webkit-scrollbar { width: 8px; }\n.fsc-setup-body::-webkit-scrollbar-thumb { background: #6a8395; border-radius: var(--fsc-radius); }\n.fsc-setup-body::-webkit-scrollbar-track { background: #203441; }\n.fsc-wizard { border: 1px solid #506c80; border-radius: var(--fsc-radius); padding: 12px; margin-bottom: 14px; }\n.fsc-wizard h3 { margin: 12px 0 6px; font-size: 16px; }\n.fsc-wizard-results { font-size: 12px; color: #b1c4d2; line-height: 1.6; }\n.fsc-wizard-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }\n.fsc-wizard-track { grid-column: 1 / -1; height: 14px; position: relative; margin: 6px 4px; background: #101f2c; border-radius: var(--fsc-radius); }\n.fsc-wizard-track i { position: absolute; height: 100%; background: #4e6e5d; border-radius: var(--fsc-radius); }\n.fsc-wizard-track b { position: absolute; top: -2px; height: 18px; width: 3px; background: var(--mock); transform: translateX(-50%); }\n.fsc-wizard-track [data-hardware] { background: var(--me); width: 8px; border-radius: var(--fsc-radius); }\n.fsc-controls h2 { font-size: 17px; font-weight: 600; }\n.fsc-storage { margin: 10px 0 14px !important; color: #b1c4d2; font-size: 12px; }\n.fsc-shared-settings { border-bottom: 1px solid #354d60; padding-bottom: 12px; }\n.fsc-connection-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 10px 0; }\n.fsc-connection-fields label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #b1c4d2; }\n.fsc-connection-fields input, .fsc-connection-fields select, [data-monitor-filter] { width: 100%; min-width: 0; box-sizing: border-box; background: #203342; color: #e2eaf0; border: 1px solid #506c80; border-radius: var(--fsc-radius); padding: 10px; font: inherit; }\n.fsc-connection-fields input:focus, .fsc-connection-fields select:focus, [data-monitor-filter]:focus { outline: 2px solid var(--me); outline-offset: 1px; }\n.fsc-connection-fields input:disabled, .fsc-connection-fields select:disabled { opacity: 0.55; }\n.fsc-connection-choice-field { display: flex; flex-direction: column; gap: 5px; color: #b1c4d2; font-size: 12px; }\n.fsc-connection-choices { display: flex; gap: 6px; }\n.fsc-connection-choices button { flex: 1; min-width: 0; min-height: 44px; padding: 8px 5px; white-space: normal; }\n.fsc-connection-choices button[aria-pressed=\"true\"] { background: #334d63; border-color: var(--me); color: #d9e9f8; }\n.fsc-connection-choices button:disabled { opacity: 0.55; }\n.fsc-shared-settings summary { cursor: pointer; font-size: 12px; color: #b1c4d2; }\n.fsc-settings-group { border-top: 1px solid #354d60; padding-top: 12px; margin-top: 16px; }\n.fsc-selector, .fsc-pickup-settings { display: flex; gap: 10px; align-items: center; margin-top: 10px; }\n.fsc-selector button { flex: 1; }\n.fsc-selector button[data-owner-choice=\"me\"][aria-pressed=\"true\"] { background: #334d63; border-color: var(--me); color: #d9e9f8; }\n.fsc-selector button[data-owner-choice=\"mock\"][aria-pressed=\"true\"] { background: #573b3b; border-color: var(--mock); color: #f4d9d5; }\n.fsc-selector button.fsc-pickup-waiting { color: #f0d591; border-color: #baa168; background: #4a4029; }\n.fsc-pickup-settings { justify-content: space-between; }\n.fsc-pickup-settings label { color: #aec2d1; font-size: 12px; }\n.fsc-pickup-settings select { margin-left: 8px; }\n.fsc-pickup-hint, .fsc-activity { margin-top: 9px !important; color: #b1c4d2; font-size: 12px; }\n.fsc-last { color: #8fa9bd; font: 11px monospace; margin-top: 4px !important; overflow-wrap: break-word; }\n.fsc-axis { display: grid; grid-template-columns: minmax(110px, 1fr) 2fr; gap: 3px 12px; padding: 9px 0; border-bottom: 1px solid #2a3b49; font-size: 12px; }\n.fsc-axis span { color: #e6ada6; }\n.fsc-axis-aligned span { color: #a2d5bb; }\n.fsc-axis small { grid-column: 1 / -1; color: #91abba; }\n.fsc-note { margin-top: 14px !important; font-size: 11px; color: #9eb0bf; }\n.fsc-monitor-row { padding: 8px 0; border-bottom: 1px solid #354e60; overflow-wrap: anywhere; font-size: 12px; }\n[data-instrument-monitor] input { width: 100%; max-width: 100%; box-sizing: border-box; }\n[data-instrument-monitor] h3 { margin: 16px 0 8px; font-size: 14px; }\n@media (max-width: 720px) { .fsc-legend { display: none; } .fsc-controls { padding-left: 8px; padding-right: 8px; } }\n@media (max-width: 460px) { .fsc-assignment { order: 4; flex-basis: 100%; text-align: center; } .fsc-footer { justify-content: space-between; } }\n";
     var controller = null;
     var registered = false;
 
@@ -332,14 +1763,14 @@ SOFTWARE.
             render() {
                 return sdk.FSComponent.buildComponent('div', {
                     ref: this.element,
-                    style: 'position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;'
+                    style: 'position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;box-sizing:border-box;padding:24px 0 56px;'
                 });
             }
             onAfterRender() {
                 this.unmount = root.FscControls.mount(this.element.instance, controller);
             }
-            onOpen() { controller.tick(); }
-            onResume() { controller.tick(); }
+            onOpen() { controller.start(); controller.tick(); }
+            onResume() { controller.start(); controller.tick(); }
             onPause() {}
             onClose() {}
             onUpdate() {}
@@ -369,7 +1800,7 @@ SOFTWARE.
             get unitsSettingsManager() { return this._unitsSettingsManager; }
             getIsSearchable() { return true; }
             getIsFavoritable() { return true; }
-            getVersion() { return '0.1.0'; }
+            getVersion() { return '0.9.10'; }
             async _install(props) {
                 this.bus = props.bus;
                 this._unitsSettingsManager = props.unitsSettingManager;
@@ -384,7 +1815,10 @@ SOFTWARE.
                 }
                 if (!controller) {
                     controller = new root.FscControls.Controller(root.FscControls.createCommBusTransport());
-                    controller.start();
+                    controller.configureRouteInspector(new root.FscControls.RouteInspector(root,{
+                        report: canonical => controller.transport.reportNavigation(canonical),
+                        reportError: diagnostic => controller.transport.reportNavigation(diagnostic)
+                    }));
                 }
                 this._isReady = true;
                 if (root.Coherent && typeof root.Coherent.trigger === 'function')

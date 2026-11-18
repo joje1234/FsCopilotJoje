@@ -272,3 +272,13 @@ __pycache__/
 FsCopilot.Bridge/_PackageInt
 FsCopilot.Bridge/Packages
 FsCopilot.Bridge/PackageSources/Modules
+FsCopilot.Efb/PackageSources/Modules/
+FsCopilot.Efb/_PackageInt/
+FsCopilot.Efb/Packages/
+FsCopilot.Efb/PackagesMetadata/
+
+# Local runtime log (without an extension).
+/log
+
+# Avalonia build-service cache.
+FsCopilot/AvaloniaUI/BuildServices/

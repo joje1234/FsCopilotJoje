@@ -3,20 +3,42 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FS Copilot Controls — UI preview</title>
+  <title>FS Copilot · Interactive UI preview</title>
   <link rel="stylesheet" href="src/controls.css">
-  <style>html, body, #app { width: 100%; height: 100%; margin: 0; }</style>
+  <link rel="stylesheet" href="preview.css">
 </head>
 <body>
-  <main id="app"></main>
-  <script>window.FSC_CONTROLS_PREVIEW = true;</script>
-  <script src="PackageSources/FsCopilotControls/FsCopilotControls.js"></script>
-  <script>
-    // Intentionally no fake simulator: the preview displays the disconnected UI.
-    var controller = new FscControls.Controller(FscControls.createCommBusTransport());
-    FscControls.mount(document.getElementById('app'), controller, { preview: true });
-    controller.start();
-    window.addEventListener('unload', function () { controller.dispose(); });
-  </script>
+  <header class="preview-header">
+    <div><span class="preview-eyebrow">FS COPILOT</span><h1>Cockpit interaction preview</h1></div>
+    <span class="preview-badge">Simulated · no connection to MSFS</span>
+  </header>
+  <main class="preview-layout">
+    <section class="preview-stage" aria-label="EFB preview">
+      <div class="preview-sizes" role="group" aria-label="Preview size">
+        <button data-size="normal" aria-pressed="true">EFB</button>
+        <button data-size="compact" aria-pressed="false">Compact</button>
+      </div>
+      <div class="preview-device" data-device><div id="app"></div></div>
+      <p class="preview-caption">Select a seat, then a control. With Me selected, double-click a control to force takeover.</p>
+    </section>
+    <aside class="preview-tools" data-preview-hardware>
+      <section><span class="preview-eyebrow">TRY A STATE</span>
+        <div class="preview-presets"><button data-scene="mixed">Mixed owners</button><button data-scene="waiting">Waiting for alignment</button><button data-scene="me">All Me</button></div>
+      </section>
+      <section><h2>Simulated hardware</h2>
+        <p>Move the sliders to the white cockpit marks. These only move this preview.</p>
+        <div data-hardware-sliders></div>
+        <button class="preview-align" data-align>Align waiting controls</button>
+      </section>
+      <section class="preview-key"><h2>Interaction</h2>
+        <p><i class="key-me"></i> Me <i class="key-mock"></i> Mock</p>
+        <p>Dim tint: assignment preview.<br>Brighter tint: confirmed owner.<br>Blink every 0.5 s: awaiting alignment.<br>Same seat or outside: cancel.<br>Me + double-click: force takeover.</p>
+        <output data-preview-status aria-live="polite">Ready</output>
+      </section>
+    </aside>
+  </main>
+  <script src="src/controller.js"></script>
+  <script src="src/view.js"></script>
+  <script src="preview.js"></script>
 </body>
 </html>

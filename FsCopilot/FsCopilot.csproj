@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <OutputType>WinExe</OutputType>
         <TargetFramework>net9.0</TargetFramework>
@@ -16,12 +16,21 @@
 
         <PublishSingleFile>true</PublishSingleFile>
         <SelfContained>true</SelfContained>
-        <PublishTrimmed>true</PublishTrimmed>     <!-- try to trim later -->
+        <!-- Authority JSON contracts and Avalonia views use runtime reflection. -->
+        <PublishTrimmed>false</PublishTrimmed>
         <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
         <DebugType>none</DebugType>
         <ErrorReport>none</ErrorReport>
         <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Remove="Simulation\Definitions.cs" />
+        <ProjectReference Include="..\FsCopilot.Definitions\FsCopilot.Definitions.csproj" />
+        <ProjectReference Include="..\FsCopilot.Transport\FsCopilot.Transport.csproj" />
+        <ProjectReference Include="..\FsCopilot.Ownership\FsCopilot.Ownership.csproj" />
+        <ProjectReference Include="..\FsCopilot.Native.Windows\FsCopilot.Native.Windows.csproj" />
+    </ItemGroup>
 
     <ItemGroup>
         <AvaloniaResource Include="Assets\icon.svg"/>

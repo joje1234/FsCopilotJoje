@@ -36,8 +36,37 @@
   <ItemGroup><ClCompile Include="control_test.cpp" /></ItemGroup>
   <ItemGroup>
     <ClInclude Include="control_gate.h" />
+    <ClInclude Include="control_runtime.h" />
+    <ClInclude Include="control_bridge_protocol.h" />
+    <ClInclude Include="control_bridge_transport.h" />
+    <ClInclude Include="control_output.h" />
+    <ClInclude Include="control_remote_writer.h" />
+    <ClInclude Include="control_session_protocol.h" />
+    <ClInclude Include="control_session.h" />
+    <ClInclude Include="control_world.h" />
+    <ClInclude Include="control_camera.h" />
+    <ClInclude Include="control_altimeters.h" />
+    <ClInclude Include="control_guidance.h" />
+    <ClInclude Include="control_guidance_protocol.h" />
+    <ClInclude Include="control_guidance_channel.h" />
+    <ClInclude Include="control_guidance_transport.h" />
+    <ClInclude Include="control_cockpit.h" />
+    <ClInclude Include="control_cockpit_protocol.h" />
+    <ClInclude Include="control_cockpit_transport.h" />
+    <ClInclude Include="control_barometer_channel.h" />
+    <ClInclude Include="control_sim_output.h" />
     <ClInclude Include="control_protocol.h" />
     <ClInclude Include="control_events.h" />
+    <ClInclude Include="control_pickup.h" />
+    <ClInclude Include="control_profile.h" />
+    <ClInclude Include="control_targets.h" />
+    <ClInclude Include="control_cockpit_refs.h" />
+    <ClInclude Include="control_definition_catalog.h" />
+    <ClInclude Include="control_definition_profile.h" />
+    <ClInclude Include="control_definition_output.h" />
+    <ClInclude Include="control_output_check.h" />
+    <ClInclude Include="control_output_validation_storage.h" />
+    <ClInclude Include="control_output_guard.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

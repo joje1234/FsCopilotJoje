@@ -1,0 +1,23 @@
+{
+    "schema":  1,
+    "version":  "0.9.1",
+    "timestamp":  "2026-11-17T20:31:16.0155500+01:00",
+    "mode":  "Ready",
+    "kit":  "C:\\Users\\jorge\\Workspace\\FsCopilotJoje\\FsCopilot.Efb\\TestKit",
+    "community":  "C:\\Users\\jorge\\AppData\\Roaming\\Microsoft Flight Simulator 2024\\Packages\\Community2024",
+    "passed":  false,
+    "simulatorContacted":  false,
+    "networkContacted":  false,
+    "checks":  [
+                   {
+                       "status":  "FAIL",
+                       "name":  "Kit manifest",
+                       "detail":  "Cannot find path \u0027C:\\Users\\jorge\\Workspace\\FsCopilotJoje\\FsCopilot.Efb\\TestKit\\test-kit.json\u0027 because it does not exist."
+                   },
+                   {
+                       "status":  "INFO",
+                       "name":  "Simulator checks",
+                       "detail":  "This checker does not contact MSFS or the relay. Both EFBs must pass the wizard, show all four output groups checked and confirm a shared connection in the live test."
+                   }
+               ]
+}

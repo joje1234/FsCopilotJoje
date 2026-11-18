@@ -88,6 +88,9 @@ public sealed class HybridNetwork : INetwork, IDisposable
     public IObservable<TPacket> Stream<TPacket>()
         => Observable.Merge(_p2p.Stream<TPacket>(), _relay.Stream<TPacket>());
 
+    public IObservable<ReceivedPacket<TPacket>> StreamWithSource<TPacket>()
+        => Observable.Merge(_p2p.StreamWithSource<TPacket>(), _relay.StreamWithSource<TPacket>());
+
     private static ICollection<Peer> MergePeers(ICollection<Peer> p2pPeers, ICollection<Peer> relayPeers)
     {
         var dict = new Dictionary<string, Peer>(StringComparer.Ordinal);
