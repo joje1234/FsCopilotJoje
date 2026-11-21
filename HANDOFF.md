@@ -1,5 +1,118 @@
 # FS Copilot EFB plan and Windows handoff
 
+## Installed 0.9.12: reconnect and automatic helper startup - 2026-11-21
+
+The user authorized fixing switch/deicing loss after rejoining and automatic
+helper startup, including retiring older EFB helper processes. MSFS was closed
+at preparation. Keep saved setup; no Reset/Relearn. Candidate root:
+`artifacts/rejoin-command-scope`. The separate vanilla-fixes repository is untouched.
+
+Concrete reconnect defect: session-created definition bridges restart commands
+at 1, but both persistent Windows SDK clients retained a connection-wide sent
+counter. Those clients now scope successful dispatch counters to immutable
+native/backend/session identity, and suppress retired-session drop callbacks.
+Current write gates, expiry, ownership and within-session replay refusal remain.
+The production-linked Windows tests fail before the fix at new-session command
+1 and pass after it across two rejoins without recreating the SDK connection.
+Ordinary cockpit/AP/trims real-relay checks pass with SDK boundaries simulated.
+No actual two-PC MSFS validation of this correction has occurred.
+
+The helper now holds an exclusive per-user file lease across async Main.
+Duplicate same-version launches exit before updating latest-log.txt or opening
+SDK clients. Positively identified older FsCopilot.Efb processes in this Windows
+session are replaced after rechecking PID, start time, path and process name.
+Newer/unknown/uninspectable or unstoppable processes cause this launch to exit.
+Never stop vanilla FsCopilot.exe. Production guard tests use injected peer
+processes and real Windows file sharing, without stopping actual processes.
+
+The test kit provides Enable/Disable automatic startup.cmd and Configure
+startup.ps1. With MSFS closed they atomically update only the helper Launch.Addon
+in the simulator's exe.xml, backing up the original and preserving unrelated
+entries. No registry or scheduled task is needed. The extracted helper folder
+must remain in place. XML fixture tests cover deduplication, backups,
+idempotence, removal, malformed/disabled refusal and validation-only behavior.
+The Windows helper publishes with zero warnings/errors. Includes all 0.9.11
+control-value isolation fixes and its identical checked native WASM.
+
+With MSFS confirmed closed by CIM and installation guards, the matching package
+and helper were installed. The production guard actually replaced the previous
+0.9.10 process. Exactly one 0.9.12 helper runs, PID 26092, executable
+`artifacts/rejoin-command-scope/bundle/Helper/FsCopilot.Efb.exe`. A real second
+launch exited 0 without stopping it or changing latest-log.txt. The 36 protected
+kit files, seven installed package files and matching helper/definitions pass.
+All six saved .bin files remain hash-identical. No settings reset occurred.
+
+MSFS automatic startup is configured in
+`C:/Users/jorge/AppData/Roaming/Microsoft Flight Simulator 2024/exe.xml`, pointing
+to that exact helper. Original XML backup is `exe.xml.fscopilot-20261121-121402-8eadd7.bak`
+beside it. Receipts: stage `installation.json`, `backup.json`,
+`live-helper/helper-process.json`, `automatic-startup.json`, `duplicate-check.json`.
+Authoritative successful install log: `tests/installation-complete.log`.
+The first install's Start-Process exit-code assertion was falsely negative;
+that attempt rolled back before startup XML changed. The verifier now owns the
+duplicate process handle directly; actual helper duplicate handling was correct.
+
+Frozen friend ZIP: `artifacts/rejoin-command-scope/test-kit/fscopilot-0.9.12-two-player-test.zip`,
+33,311,642 bytes, SHA256 `A390F8003C56B3C345A7F86E7F6BDC44D818131AA07B9E9CCC6AC9BC18C420EC`.
+Friend must install the complete matching kit with MSFS closed and run its
+Enable automatic startup.cmd once, then keep that extracted folder in place.
+Do not overwrite frozen ZIPs or previous working rollback copies. Actual
+next-MSFS-start and two-PC rejoin/engine-start validation remain required.
+
+## 0.9.11 control-value isolation candidate; not installed - 2026-11-20
+
+The user reports 0.9.10 shared controls worked on both PCs until independently
+moving left/right engine levers with the cockpit mouse during engine start.
+They have three physical levers. Their original guest helper log was supplied
+as `C:/Users/jorge/Downloads/helper-20261120-215121-4448.log`. Copies of both
+helper logs, host native log, an unchanged-production validator reproduction and
+a four-second read-only engine capture are preserved under
+`artifacts/session-engine-start-diagnostic`. No real control writes were made.
+
+Host/guest agree on the final world sequence 76807 (39820 received frames).
+Host diagnostics show missing RPM target 13 then 10; the guest then reports
+host updates delayed and native Ended/Closed/NativeFailed with held masks and
+freezes. Later its local native observations stop. The original invalid raw
+RPM number was not logged, and the later local native failure is not conclusively
+explained by these helper logs. Both helpers were 0.9.10. This was not evidence
+that separate engine values or saved learning disappeared.
+
+The production world validator AND Windows send gate rejected the entire fresh
+physics/control packet if any required target was unknown. Both defects were
+reproduced locally. 0.9.11 carries explicit unknown control markers without
+stopping physics; the native guest skips only incomplete groups. Held groups
+cannot provide stale aligned-pickup proofs. Invalid raw readings are isolated
+across all 21 slots, saved hardware scales survive outliers/alternate SET echoes,
+and invalid engine-count samples cannot replace a verified schema. Ordinary
+instrument reads are bounded per slot; reappearing guest telemetry becomes a
+baseline instead of a synthetic knob request. New diagnostics name unavailable
+and recovered axes and log native raw values/units on transitions.
+
+All changes are generic; vanilla definitions, setter routes, ownership, actual
+loss-of-link safeguards, rates and stored setup signatures are retained. Join
+behavior revision 3 prevents old/new helper peers from establishing a session.
+Both PCs also need the matching native package; use the kit preflight. See
+`FsCopilot.Efb/CONTROL_VALUE_AUDIT.md` for the complete audit and limitations.
+
+Local evidence: `artifacts/control-value-isolation/tests` contains the 21-slot /
+1–4-engine normalization matrix, production C++ group/world tests, 41 native
+contracts, 1772 loader/Jint/definition checks, 89 ownership scenarios, and relay
+tests using both actual C++ modules plus C# backend with captured SDK I/O. Faults
+in all 21 slots and nine seconds of sustained unknown controls keep the same
+session/masks/physics stream and resume on fresh data. Real stream/heartbeat
+loss still expires. Ordinary cockpit/AP/trims relay checks pass. These are local
+checks, not actual two-PC simulator validation of 0.9.11.
+
+Candidate root is `artifacts/control-value-isolation`, with fresh `build`,
+`publish`, frozen bundle/ZIP and matching `test-kit` after final verification.
+Do not overwrite frozen ZIPs. **Nothing is installed/switched/reset:** 0.9.10
+remains installed, and the separate vanilla-fixes repository/package is untouched.
+Next: install on both PCs only with MSFS fully closed, preserve saved setup and
+the working rollback, then repeat separate left/right mouse movements and the
+engine-start sequence. Capture the new raw warning if a legitimate feather/
+endpoint position is outside the currently verified range; do not guess a new
+aircraft range or write a clamped/remembered replacement value.
+
 ## Installed 0.9.10: startup stack correction, live confirmation pending - 2026-11-18
 
 **Current installed package/helper is 0.9.10.** User-tested working baseline

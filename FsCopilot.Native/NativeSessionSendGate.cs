@@ -40,8 +40,9 @@ public static class NativeSessionSendGate
         if (command.Kind == NativeSessionKind.InstrumentFeedback) return observation.Altimeters.Transport &&
             command.InstrumentFeedback!.SeatRevision == current.SeatRevision;
         if (command.Kind == NativeSessionKind.World) return current.Flags.HasFlag(NativeSessionFlags.World) &&
-            !current.Flags.HasFlag(NativeSessionFlags.PhysicsHost) && command.Axes == current.Axes && command.Generation.SequenceEqual(current.Generation) &&
-            Enumerable.Range(0, 21).All(axis => (command.Axes & (1u << axis)) == 0 || command.Positions[axis] >= 0);
+            !current.Flags.HasFlag(NativeSessionFlags.PhysicsHost) && command.Axes == current.Axes && command.Generation.SequenceEqual(current.Generation);
+        // World positions may be unknown (-1), as validated by the wire layer.
+        // The native guest skips only incomplete groups while applying fresh pose.
         if (command.Kind != NativeSessionKind.Input) return true; // Native preparation/attachment validation remains authoritative.
         if (!current.Flags.HasFlag(NativeSessionFlags.PhysicsHost) || command.Selection is not (1 or 2 or 4 or 8) || command.Sequence == 0) return false;
         var index = command.Selection == 1 ? 0 : command.Selection == 2 ? 1 : command.Selection == 4 ? 2 : 3;

@@ -60,7 +60,11 @@ public sealed partial class DefinitionCockpitBridge : IDisposable
             }
             _model.Observe(Enumerable.Range(0,_model.Count).Select(i=>observed.Known(i)?(double?)observed.Values[i]:null).ToArray());
         }
-        if(_pending!=0 && _clock.Elapsed-_writeAt>TimeSpan.FromSeconds(2)) {_model.CompleteWrite(false);_pending=0;Error="An instrument write was not confirmed; physical control sharing is unaffected.";}
+        if(_pending!=0 && _clock.Elapsed-_writeAt>TimeSpan.FromSeconds(2)) {
+            Log.Warning("[Cockpit] Command {Command} timed out in session {Session}; last native command/result {NativeCommand}/{Result}. Physical sharing continues.",
+                _pending,_session,observed.Command,observed.Result);
+            _model.CompleteWrite(false);_pending=0;Error="An instrument write was not confirmed; physical control sharing is unaffected.";
+        }
         if(_nativeAt==TimeSpan.MinValue || _clock.Elapsed-_nativeAt>TimeSpan.FromMilliseconds(250)) {Unfence();return;}
         TickRecovery(observed);
         foreach(var change in _model.Drain()) Send(new(_session,_profile.Identity,change));

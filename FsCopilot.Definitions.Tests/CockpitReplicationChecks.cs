@@ -1,6 +1,23 @@
 using FsCopilot.Simulation;
 static class CockpitReplicationChecks {
     public static void Run(Action<bool,string> check) {
+        for(var axis=0;axis<512;axis++) {
+            var isolated=new CockpitReplication(true,Enumerable.Repeat(true,512));
+            double?[] values=Enumerable.Repeat<double?>(.5,512).ToArray();
+            isolated.Observe(values);isolated.Drain();
+            values[axis]=double.NaN;values[(axis+1)%512]=.75;
+            isolated.Observe(values);var changes=isolated.Drain();
+            check(!isolated.Known(axis)&&changes.Length==1&&changes[0].Values is [{Index:var changed}]&&changed==(axis+1)%512,
+                "An unavailable ordinary instrument never blocks a valid neighbor's update.");
+        }
+        foreach(var invalid in new double?[]{null,double.NaN,double.PositiveInfinity,double.NegativeInfinity,1e300,-1e300}) {
+            var baseline=new CockpitReplication(true,[true]);var follower=new CockpitReplication(false,[true]);
+            baseline.Observe([10]);follower.Observe([10]);foreach(var change in baseline.Drain())follower.Receive(change);
+            while(follower.NextWrite() is not null)follower.CompleteWrite(true);
+            follower.Observe([invalid]);follower.Observe([11]);
+            check(follower.Drain().Length==0,"Instrument telemetry recovery cannot manufacture a knob input.");
+            follower.Observe([12]);check(follower.Drain() is [{Values:[{Value:12}]}],"The next real adjustment still shares after read recovery.");
+        }
         var host=new CockpitReplication(true,[true,true,false]);var guest=new CockpitReplication(false,[true,true,false]);
         host.Observe([1013.25,1000,20]);guest.Observe([900,900,5]);
         foreach(var change in host.Drain()) check(guest.Receive(change),"Initial host values establish a baseline before guest input.");

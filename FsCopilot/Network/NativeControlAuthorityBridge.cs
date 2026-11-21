@@ -60,6 +60,7 @@ public sealed class NativeControlAuthorityBridge : IDisposable, IAsyncDisposable
         if (native is INativeCockpitClient cockpitClient && cockpitProfile is not null)
             _cockpit = new(network,native,cockpitClient,cockpitProfile,initial,local,()=>_coordinator.Progress is {Phase:NativeAuthorityPhase.Active,Recovering:false},_scheduler);
         _coordinator.RecoveryChanged += OnRecovery;
+        _coordinator.ControlValuesChanged += OnControlValues;
         _instruments = new(local, _coordinator, () => clock.Elapsed, SendInstrumentAuthority, StartAltimeters, DispatchAltimeter);
         _guidanceReplica = new(initial);
         _guidanceClient = native as INativeGuidanceClient;
@@ -164,6 +165,12 @@ public sealed class NativeControlAuthorityBridge : IDisposable, IAsyncDisposable
         if (recovered) Log.Information("[Shared recovery] {Message}", message);
         else Log.Warning("[Shared recovery] {Message}", message);
     }
+    private void OnControlValues(uint unavailable, uint recovered) {
+        static string Names(uint mask) => string.Join(", ", Enumerable.Range(0, 21)
+            .Where(axis => (mask & (1u << axis)) != 0).Select(axis => ((ControlAxis)axis).ToString()));
+        if (unavailable != 0) Log.Warning("[Control values] Unavailable: {Axes}. Affected group output/pickup waits; fresh aircraft updates and other groups continue.", Names(unavailable));
+        if (recovered != 0) Log.Information("[Control values] Readings recovered: {Axes}.", Names(recovered));
+    }
     private void OnDropped(ulong command) => Schedule(() => {
         Log.Warning("[Shared diagnostic] Native command {Command} was dropped before SDK dispatch", command);
         _coordinator.CommandDropped(command); _instruments.CommandDropped(command);
@@ -254,6 +261,7 @@ public sealed class NativeControlAuthorityBridge : IDisposable, IAsyncDisposable
             _cockpit?.Dispose();
             _coordinator.Ended -= OnEnded;
             _coordinator.RecoveryChanged -= OnRecovery;
+        _coordinator.ControlValuesChanged -= OnControlValues;
             _coordinator.End();
             var ended = _host?.EndSession() ?? Task.FromResult(true);
             _ = ended.ContinueWith(_ => {

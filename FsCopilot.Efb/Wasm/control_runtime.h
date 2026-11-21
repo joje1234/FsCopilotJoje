@@ -170,7 +170,8 @@ public:
     }
     bool axis_fresh(size_t axis, double now) const {
         if (inputs_.relative_input(axis)) return inputs_.valid_target(axis) && inputs_.target_time >= detached_[0] && now >= inputs_.target_time && now - inputs_.target_time <= 1;
-        return inputs_.inputs[axis].detected && inputs_.inputs[axis].observed >= detached_[selection_index(axis_selection(axis))] && now - inputs_.inputs[axis].observed <= 30;
+        return inputs_.inputs[axis].detected && inputs_.input_position(axis) >= 0 &&
+            inputs_.inputs[axis].observed >= detached_[selection_index(axis_selection(axis))] && now - inputs_.inputs[axis].observed <= 30;
     }
     bool axis_aligned(size_t axis, double now) const {
         if (inputs_.relative_input(axis)) return axis_fresh(axis, now) && std::abs(inputs_.targets[axis] - control_pickup::neutral(axis)) <= tolerance[0] + 1e-9;

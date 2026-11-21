@@ -26,6 +26,18 @@ int main() {
         if(!std::strcmp(definition_profiles[0].cockpit[i].name,"A:KOHLSMAN SETTING MB EX1:2"))right=i;
     }
     assert(left!=right&&channel.known(left)&&channel.known(right)&&state.values[left]==1013.25);
+    {
+        control_cockpit isolated;
+        for (auto bad : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+            -std::numeric_limits<double>::infinity(), -1e300, 1e300}) {
+            fake_vars::state().pressure[0] = bad;
+            isolated.observe(&definition_profiles[0], "abc", session, 1);
+            assert(!isolated.known(left) && isolated.known(right) && cockpit_valid(isolated.status()));
+            fake_vars::state().pressure[0] = 1013.25;
+            isolated.observe(&definition_profiles[0], "abc", session, 1.01);
+            assert(isolated.known(left) && isolated.known(right) && calls == 0);
+        }
+    }
     cockpit_packet command{};command.kind=cockpit_kind::apply;command.command=1;command.read_serial=state.serial;command.index=left;
     std::strcpy(command.native,"abc");std::strcpy(command.backend,"abc");std::strcpy(command.session,"1234");std::strcpy(command.profile,state.profile);
     std::strcpy(command.expression,"1 16224 (>K:2:KOHLSMAN_SET)");command.values[0]=1014;command.values[1]=1013.25;

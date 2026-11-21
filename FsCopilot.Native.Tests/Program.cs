@@ -245,6 +245,7 @@ Test("world status and commands preserve physical units, copy values and fence t
     var privateCopy = state.Copy(); values[2] = 9999; Check(privateCopy.World[2] == 4321);
     var command = Command(Shared(), NativeSessionKind.World) with { Selection = 0, Axes = state.Axes, World = privateCopy.World };
     Check(NativeSessionSendGate.Allows(command, state.Backend, Status(), state));
+    Check(NativeSessionSendGate.Allows(command with { Positions = Enumerable.Repeat(-1d, 21).ToArray() }, state.Backend, Status(), state));
     Check(!NativeSessionSendGate.Allows(command, state.Backend, Status(), state with { Flags = state.Flags | NativeSessionFlags.PhysicsHost }));
     Check(!NativeSessionSendGate.Allows(command with { Generation = [1, 99, 1, 1] }, state.Backend, Status(), state));
     Check(!NativeSessionWire.Valid(state with { WorldSerial = 0 }));
@@ -252,6 +253,23 @@ Test("world status and commands preserve physical units, copy values and fence t
     Check(!NativeSessionWire.Valid(command with { World = invalid }));
     invalid[0] = 2; Check(!NativeSessionWire.Valid(command with { World = invalid }));
     Check(!NativeSessionWire.Valid(Command(Shared()) with { World = privateCopy.World }));
+});
+Test("all control slots can be unavailable without invalidating fresh world state", () => {
+    foreach (var engines in new[] { 1, 2, 3, 4 }) {
+        var mask = 0x3fu | (((1u << (engines * 3)) - 1) << 9);
+        var frame = new NativeWorldFrame(Guid.NewGuid(), 1, 1, [1, 1, 1, 1], mask, new double[12], Enumerable.Repeat(.5, 21).ToArray());
+        Check(NativeWorldFrame.Valid(frame));
+        for (var axis = 0; axis < 21; ++axis) {
+            var copy = frame.Copy(); copy.Targets[axis] = -1;
+            Check(NativeWorldFrame.Valid(copy));
+            foreach (var stray in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity, -2d, 2d, double.MaxValue }) {
+                copy.Targets[axis] = stray; Check(!NativeWorldFrame.Valid(copy));
+            }
+        }
+        Check(NativeWorldFrame.Valid(frame with { Targets = Enumerable.Repeat(-1d, 21).ToArray() }));
+        var invalid = frame.Copy(); invalid.World[0] = double.NaN; Check(!NativeWorldFrame.Valid(invalid));
+        Check(!NativeWorldFrame.Valid(frame with { Axes = mask | (1u << 22) }));
+    }
 });
 Test("seat feedback and FIFO intentions round-trip without becoming control commands", () => {
     var state = Shared() with { SeatRevision = 2, Seat = 1, SeatPending = 2, SeatRequest = 7,

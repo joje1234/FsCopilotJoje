@@ -28,7 +28,7 @@ copyFileSync(join(root, 'THIRD_PARTY_NOTICES.txt'), join(output, 'THIRD_PARTY_NO
 copyFileSync(join(root, '../LICENSE'), join(output, 'LICENSE.txt'));
 writeFileSync(join(output, 'manifest.json'), JSON.stringify({
     dependencies: [], content_type: 'MISC', title: 'FS Copilot Controls Test', manufacturer: '', creator: 'FS Copilot',
-    package_version: '0.9.10', minimum_game_version: '1.0.0', release_notes: { neutral: { LastUpdate: '', OlderHistory: '' } }
+    package_version: '0.9.12', minimum_game_version: '1.0.0', release_notes: { neutral: { LastUpdate: '', OlderHistory: '' } }
 }, null, 2));
 const content = [];
 function walk(folder) {

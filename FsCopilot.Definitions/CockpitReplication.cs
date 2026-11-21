@@ -48,6 +48,7 @@ public sealed class CockpitReplication
             var value=values[i]; if(value is null || !double.IsFinite(value.Value) || Math.Abs(value.Value)>1e12) {
                 _observed[i]=null;if(_host)_authority[i]=null;continue;
             }
+            var recovered=_observed[i] is null;
             _observed[i]=value;
             if(_writing?.Index==i) continue; // A received setter's readback is never a new knob input.
             if(_host) {
@@ -55,6 +56,9 @@ public sealed class CockpitReplication
                     _authority[i]=value; ++_revision[i]; _localRevision[i]=_revision[i];_authorityAck[i]=0;changes.Add(new(i,_revision[i],value.Value));
                     if(_desired[i] is not null && _desiredRevision[i]!=_revision[i]) _desired[i]=null;
                 }
+            } else if(recovered && _initialized[i] && _desired[i] is null) {
+                // Reappearing telemetry is a baseline, not a knob/button action.
+                _inputAnchor[i]=value;
             } else if(_initialized[i] && _desired[i] is null && _shared[i] && _inputAnchor[i] is { } before && !Equivalent(i,value.Value,before)) {
                 // Accumulate sub-precision movement without resending an unchanged
                 // proposal every observation while its host receipt is in flight.

@@ -150,7 +150,7 @@ public sealed class NativeSharedSessionService : IDisposable, IAsyncDisposable
         }
         var steering = observation.Required & 0x1ff;
         var aircraft = "aircraft-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(observation.Aircraft)));
-        var proposed = new SessionConfiguration(aircraft, (int)observation.Engines, observation.Adapter, 2,
+        var proposed = new SessionConfiguration(aircraft, (int)observation.Engines, observation.Adapter, NativeWorldFrame.BehaviorVersion,
             SessionNegotiation.AdvancedCapabilities, steering);
         if (!SessionNegotiation.ValidConfiguration(proposed)) { reason = "The aircraft/control schema is unavailable or unsupported."; return false; }
         var needed = Enum.GetValues<AtomicControlGroup>().Aggregate(0u, (mask, group) => mask | AtomicProtocol.RequiredAxes(group, proposed.Engines, steering));

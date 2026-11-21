@@ -144,7 +144,12 @@ public:
         if (event && axis_source(input.event) && !axis_source(event)) return;
         // A different absolute-event binding may use a different scale. Never
         // silently apply the previous event's mapping to the new event.
-        if (event && input.event[0] && std::strcmp(input.event, event)) input = pickup_axis{};
+        if (event && input.event[0] && std::strcmp(input.event, event)) {
+            // Cockpit/aircraft SET echoes must not replace a learned physical
+            // binding mid-session. A changed binding requires explicit Relearn.
+            if (input.calibrated || input.saved_candidates) return;
+            input = pickup_axis{};
+        }
         if (event) std::snprintf(input.event, sizeof(input.event), "%s", event);
         const double chatter = std::abs(static_cast<double>(raw)) > 200 || std::abs(static_cast<double>(input.anchor)) > 200 ? 256 : 1;
         if (!input.detected || std::abs(static_cast<double>(raw) - input.anchor) > chatter) {
@@ -164,13 +169,9 @@ public:
             // The persisted scale was already learned. Read the current raw
             // position, even at a centre/endpoint where scales coincide; do
             // not repeat learning against potentially delayed cockpit data.
-            input.saved_candidates = 0;
-            if (input_position(axis) < 0) {
-                input.calibrated = false;
-                input.candidates = 0x3ff;
-                input.confirmations = 0;
-                input.has_evidence = false;
-            }
+            // An outlier is unavailable input, not evidence to erase calibration.
+            // Preserve the mapping and wait for a valid current sample.
+            if (input_position(axis) >= 0) input.saved_candidates = 0;
         }
     }
 
@@ -223,8 +224,11 @@ public:
 
     void update(const double* values, double now, bool steering_blocked, bool quadrant_blocked, bool applying, uint32_t blocked_axes = UINT32_MAX)
     {
-        engines = std::isfinite(values[axis_count]) && values[axis_count] >= 1 && values[axis_count] <= 4 ?
-            static_cast<unsigned>(values[axis_count]) : 0;
+        // An invalid count is no evidence of an aircraft/schema change. Retain
+        // the last verified layout; startup still waits for a valid first count.
+        const double count = values[axis_count];
+        if (std::isfinite(count) && count >= 1 && count <= 4 && std::floor(count) == count) engines = static_cast<unsigned>(count);
+        // Unknown AP state cannot grant manual steering, but must not stop engines.
         autopilot = values[axis_count + 1] != 0;
         brakes_blocked = blocked_axes != UINT32_MAX ? !!(blocked_axes & ((1u << 4) | (1u << 5))) : steering_blocked;
         target_time = now;
@@ -235,13 +239,14 @@ public:
             targets[axis] = axes[axis].signed_target ? (value + 1) / 2 : value;
             if (targets[axis] < 0 && targets[axis] >= -0.001) targets[axis] = 0;
             if (targets[axis] > 1 && targets[axis] <= 1.001) targets[axis] = 1;
+            if (!std::isfinite(targets[axis]) || targets[axis] < 0 || targets[axis] > 1) targets[axis] = -1;
             auto& input = inputs[axis];
             const bool blocked = blocked_axes != UINT32_MAX ? !!(blocked_axes & (1u << axis)) : axis_group(axis) == group::steering ? steering_blocked : quadrant_blocked;
             // Returning to Me resumes input; it must never resume destructive
             // model elimination against delayed read-back. Only explicit
             // Relearn / aircraft reset may discard a validated mapping.
             if (canonical_axis(axis) || input.calibrated || applying || blocked || (axis < steering_axis_count && autopilot) || !input.detected ||
-                now - input.changed < 0.15 || now - input.observed > 2 || !std::isfinite(targets[axis])) continue;
+                now - input.changed < 0.15 || now - input.observed > 2 || !valid_target(axis)) continue;
             unsigned matching = 0;
             for (unsigned candidate = 0; candidate < 10; ++candidate)
                 if (std::abs(prediction(input.raw, candidate) - targets[axis]) <= 0.015) matching |= 1u << candidate;

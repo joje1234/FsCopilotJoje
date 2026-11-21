@@ -360,6 +360,7 @@ const char* reset_saved_setup()
 
 char recovery_packet[128]{};
 unsigned recovery_size = 0;
+uint32_t unavailable_targets = 0;
 double recovery_started = -1;
 command recovery_command{};
 struct activity
@@ -408,10 +409,10 @@ bridge_packet bridge_status(const bridge_packet* hello = nullptr)
         if (pickup.required_axis(axis)) packet.required |= bit;
         if (pickup.axis_known(axis)) packet.learned |= bit;
         if (gate.axis_fresh(axis, now)) packet.fresh |= bit;
-        if (gate.axis_aligned(axis, now)) packet.aligned |= bit;
+        if (shared_session.target_current(axis) && gate.axis_aligned(axis, now)) packet.aligned |= bit;
         const double position = pickup.input_position(axis);
         packet.input[axis] = std::isfinite(position) && position >= 0 && position <= 1 ? position : -1;
-        const bool reference_known = aircraft_identity[0] || axis < steering_axis_count || (axis - steering_axis_count) % 3 != 2;
+        const bool reference_known = shared_session.target_current(axis) && (aircraft_identity[0] || axis < steering_axis_count || (axis - steering_axis_count) % 3 != 2);
         packet.targets[axis] = reference_known && targets_fresh && std::isfinite(pickup.targets[axis]) && pickup.targets[axis] >= 0 && pickup.targets[axis] <= 1 ? pickup.targets[axis] : -1;
     }
     for (unsigned index = 0; index < 4; ++index) packet.tolerance[index] = static_cast<unsigned>(std::lround(gate.tolerance[index] * 100));
@@ -434,7 +435,7 @@ session_packet shared_status()
         const auto bit = 1u << axis;
         if (pickup.required_axis(axis)) packet.required |= bit;
         if (gate.axis_fresh(axis, now)) packet.fresh |= bit;
-        if (gate.axis_aligned(axis, now)) packet.aligned |= bit;
+        if (shared_session.target_current(axis) && gate.axis_aligned(axis, now)) packet.aligned |= bit;
         // Buttons and pedals can coexist. While Me is active, the cockpit
         // reference contains their combined demand. Never sample reflected
         // remote output as local input while Steering is masked.
@@ -602,7 +603,7 @@ void publish(const command& reply = command{}, const char* reply_error = nullptr
             char input[32] = "null", target[32] = "null";
             const double position = pickup.input_position(axis);
             if (position >= 0 && position <= 1) std::snprintf(input, sizeof(input), "%.2f", position * 100);
-            const bool reference_known = aircraft_identity[0] || axis < steering_axis_count || (axis - steering_axis_count) % 3 != 2;
+            const bool reference_known = shared_session.target_current(axis) && (aircraft_identity[0] || axis < steering_axis_count || (axis - steering_axis_count) % 3 != 2);
             if (reference_known && pickup.target_time >= 0 && now - pickup.target_time <= 1 && std::isfinite(pickup.targets[axis]) && pickup.targets[axis] >= 0 && pickup.targets[axis] <= 1)
                 std::snprintf(target, sizeof(target), "%.2f", pickup.targets[axis] * 100);
             append(message, sizeof(message), used,
@@ -611,7 +612,7 @@ void publish(const command& reply = command{}, const char* reply_error = nullptr
                 pickup.axis_known(axis) ? "true" : "false",
                 pickup.inputs[axis].saved_candidates && !pickup.canonical_axis(axis) ? "true" : "false",
                 gate.axis_fresh(axis, now) ? "true" : "false",
-                gate.axis_aligned(axis, now) ? "true" : "false",
+                reference_known && gate.axis_aligned(axis, now) ? "true" : "false",
                 pickup.canonical_axis(axis) ? "true" : "false", pickup.relative_input(axis) ? "true" : "false");
             first = false;
         }
@@ -1034,6 +1035,17 @@ void CALLBACK dispatch(SIMCONNECT_RECV* data, DWORD size, void*)
         bool learned_before[axis_count]{};
         for (size_t axis = 0; axis < axis_count; ++axis) learned_before[axis] = pickup.inputs[axis].calibrated;
         gate.update_targets(values, seconds(), !aircraft_identity[0]);
+        for (size_t axis = 0; axis < axis_count; ++axis) if (aircraft_identity[0] && pickup.required_axis(axis)) {
+            const auto bit = 1u << axis;
+            const bool unavailable = !pickup.valid_target(axis);
+            if (unavailable != !!(unavailable_targets & bit)) {
+                char detail[200]{};
+                std::snprintf(detail, sizeof(detail), "Control read %s: raw=%.9g %s; %s. Other groups and fresh physics continue",
+                    axes[axis].id, values[axis], axes[axis].units, unavailable ? "unavailable; group output/pickup waits" : "recovered");
+                trace(detail);
+                if (unavailable) unavailable_targets |= bit; else unavailable_targets &= ~bit;
+            }
+        }
         for (size_t axis = 0; axis < axis_count; ++axis) if (!learned_before[axis] && pickup.inputs[axis].calibrated) {
             char message[80]{};
             std::snprintf(message, sizeof(message), "Input learned: %s", axes[axis].id);
@@ -1189,7 +1201,7 @@ extern "C" MSFS_CALLBACK void module_init(void)
     trace("Module init: waiting for simulator and EFB");
     std::snprintf(session, sizeof(session), "%llx", static_cast<unsigned long long>(seconds() * 1000000));
     remote_output = control_definition_output{};
-    world = control_world{}; recovery_size = 0;
+    world = control_world{}; recovery_size = 0; unavailable_targets = 0;
     remote_writer.initialize(session);
     shared_session.initialize(session);
     fsCommBusRegister(command_event, receive_command, nullptr);

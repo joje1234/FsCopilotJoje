@@ -1,20 +1,29 @@
-FS COPILOT 0.9.10 - TWO-PLAYER TEST
+FS COPILOT 0.9.12 - TWO-PLAYER TEST
 
-This kit contains the matching 0.9.10 helper, definitions and Community package.
+This kit contains the matching 0.9.12 helper, definitions and Community package.
 Update BOTH PCs completely; older helpers/packages are not matching versions.
-0.9.10 repairs the 0.9.9 startup regression: callback initialization no longer
-copies large diagnostic/input objects through temporary stack values. The
-compiled module_init frame drops from 78,160 to 34,528 bytes. A new WASM build
-check rejects frames of 64 KiB or more. Actual MSFS startup still needs testing.
-KEEP all saved learning/checks. No reset/Relearn or controller remapping is
-required for this fix. After restarting, confirm Waiting for bridge clears
-and hardware moves the EFB indicators before testing button assignment.
-0.9.10 contains the Force-button error-isolation fix and a read-only instrument
-monitor. Unsupported button candidates no longer end control discovery, and
-cleanup errors cannot generate more cleanup. Actual hardware assignment
-still needs simulator validation. Keep saved learning/checks; do not reset
-or press Relearn for this update. The user confirmed 0.9.8's Nosewheel fix
-and all four local output checks pass.
+0.9.12 fixes switch/AP commands being discarded after rejoining with the same
+helper. Replay counters belong to the session binding, and a retired queued
+command cannot report failure against a new session's reused command number.
+Both helpers can remain running when leaving and rejoining. Within-session
+duplicates, stale scopes, expired commands and retired queues remain refused.
+The actual Windows clients pass a simulated-SDK persistent-connection test.
+Automatic helper startup is available: with MSFS closed, run Enable automatic
+startup.cmd once from this extracted folder. Keep the folder in place. The
+helper starts with MSFS, exits a duplicate same-version launch, and replaces
+older EFB helpers. Disable automatic startup.cmd removes its entry. Neither
+script removes other simulator startup applications or vanilla FS Copilot.
+
+This includes 0.9.11's correction: an unavailable control reading no longer
+stops the complete aircraft stream. Only the affected control group pauses; fresh physics
+and other groups continue. New valid values resume output without reconnecting.
+Outliers do not erase learned hardware, and ordinary instrument read recovery
+cannot manufacture a knob adjustment. Warnings name unavailable/recovered axes.
+Both helpers must use this version: join behavior revision 3 rejects older peers.
+KEEP saved learning/output checks. No Reset/Relearn or controller remapping.
+The previous startup/Force-button/monitor fixes are retained. This is a test
+candidate; actual two-PC engine-start validation is still required.
+
 LOCAL MONITOR: Setup > Instrument sync monitor > Open monitor. Turn one knob
 or switch at a time; Covered means its readable definition is configured for
 sharing. Both pilots / Host to copilot shows its direction. Search by name
@@ -52,7 +61,7 @@ about 1 second (peer heartbeats after 3). An established session can recover
 within 8 seconds without another Join. Stale input/world packets are discarded;
 ownership transfers and writes wait for fresh data. Genuine loss, changed
 identity or an unconfirmed control operation can still end the session.
-Both the helper and Community module must be 0.9.10 for these deadlines to agree.
+Both the helper and Community module must be 0.9.12 for these deadlines to agree.
 This update restores the 11 existing vanilla B-variable mappings for battery,
 alternators, avionics and exterior lights. They were missing from the EFB
 ordinary-instrument catalog. Both PCs need this update for switch testing.
@@ -72,7 +81,7 @@ successful two-PC flight over your internet connection. That is the test below.
 
 ON BOTH PCs - INSTALL THE COMPLETE KIT
 1. Extract this ZIP into a NEW folder on the Desktop. Keep the folder intact.
-2. Completely exit MSFS. Close vanilla FsCopilot.exe and any old FsCopilot.Efb.exe.
+2. Completely exit MSFS. Close vanilla FsCopilot.exe.
 3. Open the SAME Community folder used for the previous FS Copilot EFB test.
    Use ONE installation folder; do not install a second copy in Community2024
    and Community. On the local user's PC the tested folder is Community2024.
@@ -83,8 +92,12 @@ ON BOTH PCs - INSTALL THE COMPLETE KIT
    Move any old fscopilot-bridge package outside Community as well. Renaming an
    old package while leaving it inside Community does NOT disable it.
    Leave the simulator's WASM work folder and saved learning alone.
-4. Open THIS kit's Helper folder and run FsCopilot.Efb.exe ONCE. It runs in the
-   background; it has no desktop window. Do not run vanilla FsCopilot.exe.
+4. With MSFS still closed, run Enable automatic startup.cmd from the kit's
+   top folder. It must succeed. For the following file check only, open THIS
+   kit's Helper folder and run FsCopilot.Efb.exe ONCE. It runs in the background;
+   older EFB helpers are replaced, and duplicate launches exit. Future MSFS
+   launches start it automatically. Keep this extracted folder in place.
+   Do not run vanilla FsCopilot.exe.
 5. Run Check setup.cmd from the kit's top folder. It verifies the installed seven
    Community files, the helper currently running, all definitions and old package
    conflicts. Resolve any FAIL before joining. Its JSON report is saved in Reports.
@@ -110,7 +123,7 @@ ON BOTH PCs - INSTALL THE COMPLETE KIT
    To test from scratch intentionally, use Reset setup > Clear setup, then
    Setup wizard. No simulator restart is required after pressing Reset setup.
 
-AFTER UPDATING BOTH PCs TO 0.9.10
+AFTER UPDATING BOTH PCs TO 0.9.12
 If Check setup.cmd verifies the installed files and the existing running helper,
 you can keep that matching installation/helper. Do not reset learning again.
 Keep your current saved learning and connection preferences. The wizard reuses

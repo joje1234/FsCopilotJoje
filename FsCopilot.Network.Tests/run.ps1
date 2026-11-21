@@ -1,4 +1,4 @@
-param([string]$DotNetPath = 'dotnet', [switch]$NativeOnly, [switch]$ConnectionOnly, [switch]$InstrumentsOnly, [switch]$GuidanceOnly, [switch]$NativeGuidanceOnly)
+param([string]$DotNetPath = 'dotnet', [switch]$NativeOnly, [switch]$ConnectionOnly, [switch]$InstrumentsOnly, [switch]$GuidanceOnly, [switch]$NativeGuidanceOnly, [switch]$ControlsOnly)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $repoRoot
@@ -40,7 +40,8 @@ if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
 }
 if ($LASTEXITCODE -ne 0) { throw 'Native harness compilation failed.' }
 $arguments = @('run', '--project', 'FsCopilot.Network.Tests', '-c', 'Release', '-p:UseAppHost=false', '-p:NuGetAudit=false', '-p:RestoreIgnoreFailedSources=true')
-if ($NativeGuidanceOnly) { $arguments += @('--', '--native-guidance-only') }
+if ($ControlsOnly) { $arguments += @('--', '--controls-only') }
+elseif ($NativeGuidanceOnly) { $arguments += @('--', '--native-guidance-only') }
 elseif ($InstrumentsOnly) { $arguments += @('--', '--instruments-only') }
 elseif ($ConnectionOnly) { $arguments += @('--', '--connection-only') }
 elseif ($NativeOnly) { $arguments += @('--', '--native-only') }

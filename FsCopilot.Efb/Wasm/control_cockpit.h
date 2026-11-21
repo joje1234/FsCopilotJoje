@@ -31,7 +31,9 @@ public:
         std::memset(packet_.valid, 0, sizeof(packet_.valid));
         for (unsigned index = 0; index < packet_.count; ++index) {
             double value = 0;
-            if (read(profile->cockpit[index], value)) { packet_.values[index] = value; packet_.valid[index / 32] |= 1u << (index % 32); }
+            if (read(profile->cockpit[index], value) && std::abs(value) <= 1e12) {
+                packet_.values[index] = value; packet_.valid[index / 32] |= 1u << (index % 32);
+            }
         }
         if (packet_.serial != UINT64_MAX) ++packet_.serial;
         observed_ = now;

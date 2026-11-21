@@ -48,7 +48,9 @@ public sealed class NativeAuthorityCoordinator
     private bool _bound;
     private TimeSpan _healthyAt, _recoveryAt;
     private bool _recovering, _peerDelayed;
+    private uint _unavailableTargets;
     public event Action<string, bool>? RecoveryChanged;
+    public event Action<uint, uint>? ControlValuesChanged;
     public void PeerDelayed(bool delayed) => _peerDelayed = delayed;
     private bool NativeFresh(TimeSpan now) => _native is not null && _observation is not null &&
         now >= _nativeAt && now >= _observationAt && now - _nativeAt <= NativeSessionTiming.Fresh && now - _observationAt <= NativeSessionTiming.Fresh &&
@@ -127,7 +129,16 @@ public sealed class NativeAuthorityCoordinator
             !NativeSessionWire.Valid(session) || observation.Native != _identity.Native || session.Native != _identity.Native ||
             observation.Aircraft != _identity.Aircraft || observation.Adapter != _identity.Adapter || observation.Engines != _state.Engines ||
             session.Consent != _identity.Consent || session.Phase is NativeSessionPhase.Idle or NativeSessionPhase.Ended) { End("Native connection or local consent changed."); return; }
-        if (observation.Serial > _observationSerial) { _observation = observation.Copy(); _observationSerial = observation.Serial; _observationAt = _clock(); }
+        if (observation.Serial > _observationSerial) {
+            _observation = observation.Copy(); _observationSerial = observation.Serial; _observationAt = _clock();
+            uint unavailable = 0;
+            for (var axis = 0; axis < 21; ++axis)
+                if ((observation.Required & (1u << axis)) != 0 && observation.Targets[axis] < 0) unavailable |= 1u << axis;
+            if (unavailable != _unavailableTargets) {
+                var before = _unavailableTargets; _unavailableTargets = unavailable;
+                ControlValuesChanged?.Invoke(unavailable & ~before, before & ~unavailable);
+            }
+        }
         if (session.Serial <= _nativeSerial) return; // Copies accompanying observation pushes never refresh a native proof.
         _native = session.Copy(); _nativeSerial = session.Serial; _nativeAt = _clock();
         if (session.Phase is NativeSessionPhase.Binding or NativeSessionPhase.Active &&

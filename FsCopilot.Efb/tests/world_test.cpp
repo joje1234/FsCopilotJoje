@@ -35,6 +35,61 @@ session_packet world_command(fixture& f, uint64_t sequence = 1) {
 }
 int main() {
     {
+        fixture f; bind_world(f); auto frame = world_command(f);
+        for (size_t first = 9; first <= 11; ++first) { frame.positions[first] = .25; frame.positions[first+3] = .75; }
+        assert(shared_session.receive(frame, f.now));
+        for (size_t axis = 9; axis < 15; ++axis) {
+            output_action expected{}; assert(output_for_axis(pickup, axis, frame.positions[axis], expected));
+            unsigned matched = 0;
+            for (const auto& sent : fake_sim::transmissions)
+                if (fake_sim::names[sent.event] == expected.event) { assert(static_cast<int32_t>(sent.raw) == expected.raw); ++matched; }
+            assert(matched == 1);
+        }
+        assert(shared_session.active() && gate.blocked == 15);
+    }
+    for (size_t axis = 0; axis < axis_count; ++axis) {
+        fixture f; bind_world(f);
+        auto frame = world_command(f); frame.positions[axis] = -1;
+        const auto before = fake_sim::transmissions.size();
+        assert(session_valid(frame) && shared_session.receive(frame, f.now));
+        assert(fake_sim::object_writes.size() == 1 && shared_session.active() && gate.blocked == 15);
+        const bool required = !!(f.authority.axes & (1u << axis));
+        assert(fake_sim::transmissions.size() == before + (required ? 6 : 8));
+        if (required) {
+            assert(!shared_session.target_current(axis));
+            const auto observed = bridge_status();
+            assert(observed.targets[axis] == -1 && !(observed.aligned & (1u << axis)));
+            assert(!(shared_status().aligned & (1u << axis)));
+        }
+        if (required) for (size_t i = before; i < fake_sim::transmissions.size(); ++i)
+            assert(event_selection(events[fake_sim::transmissions[i].event-first_event]) != axis_selection(axis));
+        // No stale substitution or catch-up: the next fresh complete frame resumes.
+        frame = world_command(f, 2);
+        const auto resumed = fake_sim::transmissions.size();
+        assert(shared_session.receive(frame, f.now) && fake_sim::transmissions.size() == resumed + 8);
+        assert(shared_session.target_current(axis));
+        assert(shared_session.active() && world.owned());
+    }
+    {
+        fixture f; bind_world(f);
+        // Longer than both recovery deadlines: valid physics with every control
+        // unavailable must keep the guest stream alive without a control write.
+        for (uint64_t step = 1; step <= 14; ++step) {
+            if (step > 1) f.now += .75;
+            pickup.target_time = f.now; sample_world(f, 7);
+            assert(shared_session.receive(f.command(session_kind::heartbeat), f.now));
+            auto frame = world_command(f, step);
+            for (auto& position : frame.positions) position = -1;
+            const auto before = fake_sim::transmissions.size();
+            assert(shared_session.receive(frame, f.now) && shared_session.active());
+            assert(fake_sim::transmissions.size() == before && gate.blocked == 15 && world.owned());
+        }
+        assert(fake_sim::object_writes.size() == 14);
+        auto bad = world_command(f, 15); bad.positions[10] = std::numeric_limits<double>::quiet_NaN();
+        assert(!session_valid(bad) && !shared_session.receive(bad, f.now));
+        assert(shared_session.active() && fake_sim::object_writes.size() == 14);
+    }
+    {
         fixture f; bind_world(f); const auto before = fake_sim::transmissions.size();
         auto frame = world_command(f); assert(shared_session.receive(frame, f.now));
         assert(fake_sim::object_writes.size() == 1 && fake_sim::transmissions.size() == before + 8);

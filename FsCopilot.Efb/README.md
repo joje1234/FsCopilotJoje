@@ -1,5 +1,41 @@
 # FS Copilot EFB control test
 
+**0.9.12 is installed: reconnect correction and automatic helper startup.**
+MSFS automatic startup is configured on this PC. Exactly one matching helper
+runs; a real second launch exited with code 0 and preserved the original helper
+and latest-log pointer. All seven installed files pass kit checks; six saved
+settings files are hash-identical. A verified 0.9.10 rollback is retained.
+The Windows cockpit/AP channels now restart command numbering for a new session
+binding on an existing SDK connection. Old queue failures cannot fault a new
+session's reused command number. Tests reproduce the old command-1 failure and
+pass across repeated rejoins with the actual clients and simulated SDK I/O.
+
+With MSFS closed, run the test kit's **Enable automatic startup.cmd** once.
+It adds the matching helper to MSFS 2024's `exe.xml`, preserving other startup
+entries and backing up the original file. Keep the extracted kit in place.
+**Disable automatic startup.cmd** removes only the EFB helper entry. The helper
+holds an exclusive Windows file lease: an extra same-version launch exits,
+and a newer helper replaces older EFB helpers in the current Windows session.
+Vanilla `FsCopilot.exe` is not stopped. If an existing helper cannot be inspected
+or stopped, the new launch exits without starting another active helper.
+
+Includes the complete 0.9.11 control-value fixes below. Saved settings/output
+checks and rates remain unchanged. Evidence and the matching kit are under
+`artifacts/rejoin-command-scope`. Actual MSFS automatic launch and two-PC
+rejoin/engine-start validation remain pending. Historical versions follow.
+
+**Historical 0.9.11 control-value isolation candidate, before 0.9.12 installation.**
+One unavailable control reading no longer stops the complete aircraft stream.
+Fresh physics and other groups continue; the affected complete group waits for
+new valid readings. A held target cannot supply stale aligned-pickup proof.
+Saved mappings survive outliers/SET echoes, and ordinary instrument recovery
+does not manufacture knob input. The full audit and local test coverage are in
+[CONTROL_VALUE_AUDIT.md](CONTROL_VALUE_AUDIT.md). Both PCs need the matching
+complete update (join behavior revision 3). Keep learning/output checks; no
+Reset/Relearn. Actual two-PC MSFS engine-start validation is still required.
+Candidate/build/test evidence is under `artifacts/control-value-isolation`.
+The historical installed-version notes below describe 0.9.10 and earlier.
+
 **0.9.10 and its matching helper are installed, with saved learning/checks kept.**
 0.9.9 failed before native initialization. This update removes large startup
 temporaries, reducing the compiled initialization frame from 78,160 to 34,528

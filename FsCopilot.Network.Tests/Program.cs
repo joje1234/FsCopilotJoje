@@ -34,6 +34,13 @@ internal static class Program
     }
     private static async Task Run(string[] args)
     {
+        if (args.Contains("--controls-only")) {
+            using var controls = new Relay(NullLogger<Relay>.Instance, new ServerStats(), port: 0, loopbackOnly: true);
+            await controls.StartAsync(CancellationToken.None);
+            try { await NativeCoordinatorNetworkTests.Run(controls.LocalPort); }
+            finally { await controls.StopAsync(CancellationToken.None); }
+            return;
+        }
         if(args.Contains("--cockpit-only")) {
             using var relay=new Relay(NullLogger<Relay>.Instance,new ServerStats(),port:0,loopbackOnly:true);
             await relay.StartAsync(CancellationToken.None);

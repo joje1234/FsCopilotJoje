@@ -27,6 +27,8 @@ struct request {
 static_assert(sizeof(request) == 1724, "Harness request layout changed");
 size_t confirmed = 0, applied = 0, written = 0;
 double world_model[world_value_count] = {0.8, 0.15, 2500, 0.05, -0.04, 2.5, 12, 3, 160, 0.1, 0.2, 0.3};
+uint32_t readback_fault_axes = 0;
+double readback_fault_values[axis_count]{};
 uint32_t freeze_model = 0;
 double pressure_model[4] = {999.125, 1, 1012.5, 0};
 struct simulated_instrument_input : altimeter_input_gate {
@@ -194,6 +196,8 @@ void pump() {
         ap->dwID = SIMCONNECT_RECV_ID_SIMOBJECT_DATA; ap->dwRequestID = control_guidance::read_request; ap->dwDefineCount = control_guidance::value_count;
         std::memcpy(&ap->dwData, guidance_model, sizeof(guidance_model)); dispatch(ap, static_cast<DWORD>(ap_bytes.size()), nullptr);
     }
+    for (size_t axis = 0; axis < axis_count; ++axis)
+        if (readback_fault_axes & (1u << axis)) pickup.targets[axis] = readback_fault_values[axis];
     remote_writer.tick(seconds()); shared_session.tick(seconds(), native_bridge.available); drain();
     Update_StandAlone(0); // Includes deferred explicit world recovery.
 }
@@ -281,6 +285,18 @@ int main(int argc, char** argv) {
             receive_command(text, static_cast<unsigned>(std::strlen(text)), nullptr);
         }
         else if (value.kind == 11) { assert(world_valid(value.positions)); std::memcpy(world_model, value.positions, sizeof(world_model)); }
+        else if (value.kind == 19) {
+            // Raw read-back fault injection only. Production bridge_status must
+            // convert each invalid slot to unknown; no hardware command is sent.
+            readback_fault_axes |= value.selection;
+            for (size_t axis = 0; axis < axis_count; ++axis)
+                if (value.selection & (1u << axis)) readback_fault_values[axis] = value.positions[axis];
+        }
+        else if (value.kind == 20) {
+            readback_fault_axes &= ~value.selection;
+            for (size_t axis = 0; axis < axis_count; ++axis)
+                if (value.selection & (1u << axis)) pickup.targets[axis] = physical[axis];
+        }
         else if (value.kind == 12) { assert(std::memchr(value.text, 0, sizeof(value.text))); receive_command(value.text, static_cast<unsigned>(std::strlen(value.text)), nullptr); }
         else if (value.kind == 13) {
             bridge_packet report{}; std::memcpy(&report, &value.command, sizeof(report)); assert(bridge_valid(report) && report.kind == bridge_kind::backend);

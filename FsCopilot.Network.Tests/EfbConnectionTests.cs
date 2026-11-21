@@ -73,6 +73,21 @@ internal static class EfbConnectionTests
             hostNative.State.Session!.Attached == 15 && hostNative.State.Session.Blocked == 0 && peerNative.State.Session!.Attached == 15,
             "fresh EFB Join establishes the configured shared session", Detail);
         var retainedSession = hostNative.State.Session!.Session;
+        var faultAltitude = 5000d;
+        foreach (var axis in Enumerable.Range(0, 21).Where(axis => (hostNative.State.Snapshot!.Required & (1u << axis)) != 0)) {
+            foreach (var stray in new[] { -1d, double.NaN, double.PositiveInfinity, double.NegativeInfinity, -2d, 2d }) {
+                hostNative.ControlReadback(1u << axis, stray);
+                var expected = ++faultAltitude; hostNative.World(expected);
+                await Wait(() => Math.Abs(peerNative.State.Session!.World[2] - expected) < .001 && peerNative.State.Snapshot!.Targets[axis] < 0,
+                    $"full definition-driven schema isolates invalid control {axis}", Detail);
+                Check(hp?.Notice.Phase == NativeBackendPhase.Active && pp?.Notice.Phase == NativeBackendPhase.Active &&
+                    peerNative.State.Session!.Session == retainedSession && peerNative.State.Session.Blocked == 15 &&
+                    (peerNative.State.Session.Aligned & (1u << axis)) == 0, "An unavailable control ended sharing or supplied stale alignment");
+                hostNative.ClearControlReadback(1u << axis);
+                await Wait(() => peerNative.State.Snapshot!.Targets[axis] >= 0, "current definition readback resumes without setup reset", Detail);
+            }
+        }
+        Console.WriteLine("PASS full six-axis Steering plus all engine pairs: every required readout fault keeps physics/session/masks and suppresses stale pickup proof");
         hostNative.ResetSetup();peerNative.ResetSetup();await Task.Delay(250);
         Check(hostNative.State.Session!.Session==retainedSession && peerNative.State.Session!.Session==retainedSession &&
             hostNative.State.Session.Phase==NativeSessionPhase.Active && peerNative.State.Session.Phase==NativeSessionPhase.Active &&

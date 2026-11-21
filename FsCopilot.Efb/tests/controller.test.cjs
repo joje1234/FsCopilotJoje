@@ -149,6 +149,17 @@ test('alignment status rejects old bridges, invalid positions and unsafe toleran
     assert.equal(controller.setTolerance('steering', 5), true);
     assert.equal(sent[0], '5|test-client|1|tolerance|steering|5');
 });
+test('one unavailable control keeps the EFB live and other ownership commands usable', () => {
+    for (const group of ['steering', 'throttle', 'propeller', 'mixture']) {
+        const packet = status();
+        packet.pickup[group].axes = [{ id: group === 'steering' ? 'roll' : group + '1', label: 'Test control',
+            input: null, target: null, calibrated: true, fresh: false, aligned: false }];
+        assert(validStatus(packet));
+        const { controller } = setup(); controller.receive(packet);
+        assert(controller.state().online && controller.state().usable);
+        assert(controller.setOwner(group === 'steering' ? 'mixture' : 'steering', 'mock'));
+    }
+});
 test('timeout reports uncertainty and never automatically retries a mutation', () => {
     const { controller, advance, sent } = setup();
     controller.receive(status());

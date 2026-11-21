@@ -15,6 +15,13 @@ public:
         pickup_(pickup), runtime_(runtime), writer_(writer), world_(world), barometers_(altimeters, instrument_gate), guidance_(autopilot, guidance_gate) {}
     bool configure_guidance_adapter(guidance_input_gate* adapter) { return phase_ == session_phase::idle && !holding_ && guidance_.configure(adapter); }
     void stop_guidance() { guidance_.stop(); }
+    bool target_current(size_t axis) const {
+        if (axis >= axis_count) return false;
+        if (!active() || !world_mode_ || host_) return true;
+        const auto selection = axis_selection(axis); const auto index = selection_index(selection);
+        if (state_.owner[index] == writer_owner::local && (state_.attached & selection) && !(state_.pending & selection)) return true;
+        return !(unavailable_world_groups_ & selection);
+    }
     bool receive_guidance(const guidance_packet& p, double now) {
         if (!guidance_frame_valid(p) || p.kind != guidance_kind::command || !std::isfinite(now) || now < renewed_) return false;
         if (active() && now - renewed_ >= session_recovery_seconds) { stop(session_error::expired); return false; }
@@ -295,6 +302,7 @@ private:
     instrument_feedback instrument_ui_{};
     double instrument_ui_at_ = -1;
     bool world_mode_ = false, world_started_ = false;
+    uint32_t unavailable_world_groups_ = select_all;
     uint64_t world_sequence_ = 0;
     char native_[24]{}, consent_[40]{}, pending_[4][40]{}, prepared_[4][40]{}, committed_[4][40]{};
     writer_binding binding_{}; writer_state state_{}; session_packet request_{};
@@ -348,9 +356,10 @@ private:
             now - renewed_ >= session_recovery_seconds || p.revision != state_.revision || p.axes != state_.axes ||
             !p.sequence || p.sequence <= world_sequence_ || !world_->ready(now)) return false;
         for (unsigned index = 0; index < 4; ++index) if (p.generation[index] != state_.generation[index]) return false;
-        for (size_t axis = 0; axis < axis_count; ++axis) if ((state_.axes & (1u << axis)) && p.positions[axis] < 0) return false;
-        // Validate every remote-owned control plan before exposing any part of
-        // the world packet to the SDK. Local owners are never mirrored.
+        // Validate each complete remote-owned group independently. A missing
+        // lever pauses that group's output, never the fresh aircraft pose or
+        // other groups. The schema and ownership/mask fences stay unchanged.
+        uint32_t writable = 0, unavailable = 0;
         for (unsigned index = 0; index < 4; ++index) {
             const auto bit = 1u << index;
             if (!(runtime_.blocked & bit) || (state_.owner[index] == writer_owner::local && (state_.attached & bit) && !(state_.pending & bit)) || (index == 0 && pickup_.autopilot)) continue;
@@ -358,13 +367,15 @@ private:
             uint32_t required = 0;
             for (size_t axis = 0; axis < axis_count; ++axis) if ((state_.axes & (1u << axis)) && control_pickup::matches_group(axis, target)) required |= 1u << axis;
             output_action plan[axis_count]{}; size_t count = 0;
-            if (!group_output(pickup_, target, required, p.positions, plan, count)) return false;
+            if (group_output(pickup_, target, required, p.positions, plan, count)) writable |= bit;
+            else unavailable |= bit;
         }
         world_sequence_ = p.sequence; // A partial SDK batch cannot be replayed.
         if (!world_->write(p.world_values, now)) { stop(); return false; }
+        unavailable_world_groups_ = unavailable;
         for (unsigned index = 0; index < 4; ++index) {
             const auto bit = 1u << index;
-            if (!(runtime_.blocked & bit) || (state_.owner[index] == writer_owner::local && (state_.attached & bit) && !(state_.pending & bit)) || (index == 0 && pickup_.autopilot)) continue;
+            if (!(writable & bit)) continue;
             writer_frame frame{}; frame.binding = binding_; frame.revision = state_.revision;
             frame.generation = state_.generation[index]; frame.sequence = p.sequence;
             frame.target = index == 0 ? group::steering : index == 1 ? group::throttle : index == 2 ? group::propeller : group::mixture;
@@ -385,7 +396,7 @@ private:
         binding_ = session_binding(p); state_ = state; received_ = p.command; renewed_ = now;
         automatic_ = p.automatic; automatic_waiting_ = 0;
         host_ = !!(p.flags & session_host); holding_ = true; phase_ = session_phase::binding;
-        world_mode_ = !!(p.flags & session_world); world_started_ = false; world_sequence_ = 0;
+        world_mode_ = !!(p.flags & session_world); world_started_ = false; world_sequence_ = 0; unavailable_world_groups_ = select_all;
         for (unsigned index = 0; index < 4; ++index) if (state_.owner[index] == writer_owner::local) {
             eligible_[index] = state_.generation[index];
             std::snprintf(prepared_[index], sizeof(prepared_[index]), "%s", binding_.session);
@@ -425,6 +436,10 @@ private:
             for (unsigned index = 0; index < 4; ++index) if ((request_.selection & (1u << index)) && !forced_[index]) force = false;
         }
         if (force) return true;
+        for (size_t axis = 0; axis < axis_count; ++axis)
+            if ((request_.selection & axis_selection(axis)) && pickup_.required_axis(axis) && !target_current(axis)) {
+                stable_since_ = -1; return false;
+            }
         if (!runtime_.aligned(request_.selection, now)) { stable_since_ = -1; return false; }
         if (stable_since_ < 0) stable_since_ = now;
         return now - stable_since_ >= 0.3;

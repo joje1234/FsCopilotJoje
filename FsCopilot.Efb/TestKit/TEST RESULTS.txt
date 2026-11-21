@@ -1,5 +1,32 @@
-FS Copilot 0.9.10 two-player test card
+FS Copilot 0.9.12 two-player test card
+LOCAL S1 - After enabling automatic startup with MSFS closed, start MSFS
+without manually starting the helper. Confirm EFB connection and exactly one
+FsCopilot.Efb.exe in Task Manager. Manually launch the same helper once; the
+extra launch must exit and the existing EFB connection remain available.
+Keep this extracted kit folder in place. Do not test upgrades during a flight.
+Result / helper count / time:
 
+NETWORK R1 - While parked with AP off, test a named light and a deicing switch
+in BOTH directions. Note the exact switches and compare cockpit switch states.
+Leave shared controls, recover local controls, then Join again on both PCs
+WITHOUT restarting either helper or MSFS. Repeat those switch tests, then a
+heading-bug adjustment from each PC. Repeat the leave/rejoin once more.
+No Reset/Relearn. Both directions must still work after each rejoin. If a
+switch fails, note time/direction/name, open the instrument monitor on both PCs,
+and collect both helper/native logs before any restart. Do not perform deicing
+changes in flight as a diagnostic.
+Result / direction / exact switches / time:
+NETWORK V1 - On both PCs keep saved setup; park with brake on, AP off.
+Join and confirm local/remote ownership. The owner moves left/right throttle,
+RPM and mixture separately with the cockpit mouse, including normal endpoints
+and the engine-start sequence. Compare each lever on the other PC. Do not use
+hardware paired to both engines while testing separate mouse positions.
+Both sessions must stay connected. If a read is unavailable, its group may
+pause, but aircraft updates and other controls must continue; a fresh valid
+read must resume without Relearn or reconnect. Collect both logs if anything
+stalls, including the native raw-value warning. Do not invent an unavailable
+value or apply a remembered value as a new command.
+Result / exact control position / time / warning:
 LOCAL F1 - Assign Steering Force button. Valid press/release saves it;
 all control rows remain available. Force returns only Steering to Me.
 If assignment fails, capture its exact error; do not reset learning.

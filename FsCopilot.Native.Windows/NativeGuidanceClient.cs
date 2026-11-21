@@ -37,6 +37,12 @@ internal sealed class NativeGuidanceClient : IDisposable
         _reader = Task.Factory.StartNew(Run, _stop.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
     }
     private TimeSpan Now() => Stopwatch.GetElapsedTime(_started);
+    private void Drop(Queued queued) {
+        var main = _primary(); var packet = queued.Packet;
+        // Do not deliver retired-session failures under a reused command ID.
+        if (main.Snapshot?.Native == packet.Native && main.Backend == packet.Backend && main.Session?.Session == packet.Session)
+            Dropped?.Invoke(packet.Command);
+    }
     public void SetFence(NativeGuidanceFence? fence) { lock (_fenceLock) _fence = fence; }
     public bool TrySend(NativeGuidancePacket packet, Func<Func<bool>, bool>? execute)
     {
@@ -59,7 +65,7 @@ internal sealed class NativeGuidanceClient : IDisposable
             var main = _primary();
             if (!main.Live || main.Snapshot is not { } observed || (observed.Capabilities & 16) == 0) {
                 Publish(false, false, null, "AP transport has not been advertised.");
-                while (_queue.TryDequeue(out var retired)) { Interlocked.Decrement(ref _queued); Dropped?.Invoke(retired.Packet.Command); }
+                while (_queue.TryDequeue(out var retired)) { Interlocked.Decrement(ref _queued); Drop(retired); }
                 _stop.Token.WaitHandle.WaitOne(200); continue;
             }
             try { Read(observed.Native); }
@@ -73,6 +79,7 @@ internal sealed class NativeGuidanceClient : IDisposable
         using var sim = new SimConnect("FS Copilot AP bridge", IntPtr.Zero, 0, signal, 0);
         var opened = false; var reconnect = false; var connectedAt = Now(); var receivedAt = TimeSpan.MinValue;
         ulong serial = 0, sentCommand = 0; NativeGuidancePacket? last = null;
+        (string Native, string Backend, string Session)? sentScope = null;
         sim.OnRecvOpen += (_, _) => {
             opened = true;
             sim.MapClientDataNameToID(_prefix + NativeGuidanceWire.StatusName, Area.Status);
@@ -105,17 +112,21 @@ internal sealed class NativeGuidanceClient : IDisposable
                 Interlocked.Decrement(ref _queued);
                 bool Write() {
                     lock (_fenceLock) {
-                        if (_stop.IsCancellationRequested || _fence?.Allows(queued.Packet) != true || Now() > queued.Expires || queued.Packet.Command <= sentCommand ||
+                        var scope = (queued.Packet.Native, queued.Packet.Backend, queued.Packet.Session);
+                        // Keep replay protection across AP execution-fence/epoch
+                        // changes, but permit numbering to restart on rejoin.
+                        if (_stop.IsCancellationRequested || _fence?.Allows(queued.Packet) != true || Now() > queued.Expires ||
+                            (sentScope == scope && queued.Packet.Command <= sentCommand) ||
                             !NativeGuidanceSendGate.Allows(queued.Packet, _primary(), State)) return false;
                         sim.SetClientData(Area.Command, Area.Command, SIMCONNECT_CLIENT_DATA_SET_FLAG.DEFAULT, 0, new Bytes { Data = queued.Bytes });
-                        sentCommand = queued.Packet.Command;
+                        sentScope = scope; sentCommand = queued.Packet.Command;
                         return true;
                     }
                 }
                 // Execute may acquire the host model lock. Never hold the
                 // transport lock while entering that model fence.
                 var written = queued.Execute is null ? Write() : queued.Execute(Write);
-                if (!written) Dropped?.Invoke(queued.Packet.Command);
+                if (!written) Drop(queued);
             }
         }
         if (!_stop.IsCancellationRequested) Publish(false, false, null, State.Error.Length == 0 ? "AP connection closed." : State.Error);

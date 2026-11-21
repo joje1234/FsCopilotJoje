@@ -30,7 +30,7 @@ function Check-Payload([string]$Root,[string]$Relative,$Payload,[string]$Label) 
 $manifest = $null
 try {
     $manifest = Get-Content -LiteralPath (Join-Path $KitRoot 'test-kit.json') -Raw | ConvertFrom-Json
-    if ($manifest.schema -ne 1 -or $manifest.version -ne '0.9.10' -or @($manifest.payloads).Count -lt 7) { throw 'Unsupported or incomplete test-kit manifest.' }
+    if ($manifest.schema -ne 1 -or $manifest.version -ne '0.9.12' -or @($manifest.payloads).Count -lt 7) { throw 'Unsupported or incomplete test-kit manifest.' }
     $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($payload in $manifest.payloads) {
         if (-not $seen.Add($payload.path) -or $payload.sha256 -notmatch '^[0-9a-fA-F]{64}$' -or $payload.bytes -lt 0) { throw 'Invalid or duplicate manifest entry.' }
@@ -72,7 +72,7 @@ if ($CommunityPath -and $manifest) {
     $good = $packageFiles.Count -eq 7
     if (-not $good) { Add-Check 'FAIL' 'Installed package' 'The manifest must contain exactly seven Community files.' }
     foreach ($payload in $packageFiles) { if (-not (Check-Payload $installed $payload.path.Substring($prefix.Length) $payload 'Installed package')) { $good=$false } }
-    if ($good) { Add-Check 'PASS' 'Installed package' ('Seven files match 0.9.10 in '+$installed) }
+    if ($good) { Add-Check 'PASS' 'Installed package' ('Seven files match 0.9.12 in '+$installed) }
     # Renaming a package inside Community does not disable it: its manifest still loads.
     if (Test-Path -LiteralPath $CommunityPath -PathType Container) {
         foreach ($folder in Get-ChildItem -LiteralPath $CommunityPath -Directory) {
@@ -112,7 +112,7 @@ if ($Mode -eq 'Ready') {
     }
     Add-Check 'INFO' 'Simulator checks' 'This checker does not contact MSFS or the relay. Both EFBs must pass the wizard, show all four output groups checked and confirm a shared connection in the live test.'
 }
-$report = [pscustomobject]@{schema=1;version='0.9.10';timestamp=[DateTimeOffset]::Now.ToString('o');mode=$Mode;kit=$KitRoot;community=$CommunityPath;passed=@($checks | Where-Object status -EQ 'FAIL').Count -eq 0;simulatorContacted=$false;networkContacted=$false;checks=$checks.ToArray()}
+$report = [pscustomobject]@{schema=1;version='0.9.12';timestamp=[DateTimeOffset]::Now.ToString('o');mode=$Mode;kit=$KitRoot;community=$CommunityPath;passed=@($checks | Where-Object status -EQ 'FAIL').Count -eq 0;simulatorContacted=$false;networkContacted=$false;checks=$checks.ToArray()}
 New-Item -ItemType Directory -Path $ReportDirectory -Force | Out-Null
 $reportPath=Join-Path $ReportDirectory ('setup-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'-'+[Guid]::NewGuid().ToString('N').Substring(0,6)+'.json')
 [IO.File]::WriteAllText($reportPath,($report | ConvertTo-Json -Depth 8)+[Environment]::NewLine)

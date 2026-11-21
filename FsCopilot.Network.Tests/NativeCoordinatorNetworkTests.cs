@@ -109,6 +109,32 @@ internal static class NativeCoordinatorNetworkTests
             await Wait(() => Math.Abs(peerNative.State.Session!.World[2] - 4321) < 0.001, "host world replaces local guest drift", Detail);
             Check(Math.Abs(hostNative.State.Session!.World[2] - 4321) < 0.001, "Guest world changed the fixed physics host");
             Console.WriteLine("PASS fixed-host world replication writes guest position through the actual native SDK adapter");
+            var faultAltitude = 4400d;
+            foreach (var axis in Enumerable.Range(0, 21)) foreach (var stray in new[] { -1d, double.NaN, double.PositiveInfinity, double.NegativeInfinity, -2d, 2d }) {
+                hostNative.ControlReadback(1u << axis, stray);
+                var expectedAltitude = ++faultAltitude; hostNative.World(expectedAltitude);
+                await Wait(() => Math.Abs(peerNative.State.Session!.World[2] - expectedAltitude) < .001,
+                    $"physics continues with invalid control slot {axis}", Detail);
+                Check(hostNative.State.Snapshot!.Targets[axis] == -1, "Raw outlier escaped as a control position");
+                Check(hostProgress?.Phase == NativeAuthorityPhase.Active && peerProgress?.Phase == NativeAuthorityPhase.Active &&
+                    peerNative.State.Session!.Blocked == 15, "A control outlier ended the session or released masks");
+                hostNative.ClearControlReadback(1u << axis);
+            }
+            hostNative.ControlReadback(0x7e07, double.NaN);
+            var sustained = Stopwatch.StartNew();
+            while (sustained.Elapsed < TimeSpan.FromSeconds(9)) {
+                var expectedAltitude = ++faultAltitude; hostNative.World(expectedAltitude);
+                await Wait(() => Math.Abs(peerNative.State.Session!.World[2] - expectedAltitude) < .001,
+                    "sustained unknown controls keep fresh physics alive past recovery deadlines", Detail);
+                await Task.Delay(100);
+            }
+            Check(hostProgress?.Phase == NativeAuthorityPhase.Active && peerProgress?.Phase == NativeAuthorityPhase.Active &&
+                hostNative.State.Session!.Blocked == 0 && peerNative.State.Session!.Blocked == 15, "Sustained missing controls ended or changed ownership");
+            hostNative.ClearControlReadback(0x7e07);
+            hostNative.World(4321);
+            await Wait(() => Math.Abs(peerNative.State.Session!.World[2] - 4321) < .001 && peerNative.State.Snapshot!.Targets[10] >= 0,
+                "fresh complete controls resume without reconnect or relearn", Detail);
+            Console.WriteLine("PASS all 21 outlier slots across actual C++/C# relay: fresh physics survives, masks retained, nine-second loss recovers in the same session");
 
             const uint throttle = (1u << 9) | (1u << 12), rpm = (1u << 10) | (1u << 13), mixture = (1u << 11) | (1u << 14);
             peerNative.Efb(ControlSelection.Quadrant, NativeSessionIntent.AutoOn);

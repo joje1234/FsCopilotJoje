@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><UseAppHost>false</UseAppHost><TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../FsCopilot.Native/FsCopilot.Native.csproj" />
+    <Compile Include="../FsCopilot.Native.Windows/NativeCockpitClient.cs" Link="Production/NativeCockpitClient.cs" />
+    <Compile Include="../FsCopilot.Native.Windows/NativeGuidanceClient.cs" Link="Production/NativeGuidanceClient.cs" />
+    <Compile Include="../FsCopilot.Efb.Backend/HelperInstance.cs" Link="Production/HelperInstance.cs" />
+  </ItemGroup>
+</Project>

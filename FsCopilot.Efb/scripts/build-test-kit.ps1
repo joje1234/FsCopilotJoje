@@ -5,14 +5,14 @@ param(
 )
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-if(-not $CandidateRoot){$CandidateRoot=Join-Path $repo 'artifacts/bridge-startup'}
-if(-not $Stage){$Stage=Join-Path $repo 'artifacts/bridge-startup/test-kit'}
+if(-not $CandidateRoot){$CandidateRoot=Join-Path $repo 'artifacts/rejoin-command-scope'}
+if(-not $Stage){$Stage=Join-Path $repo 'artifacts/rejoin-command-scope/test-kit'}
 $CandidateRoot=[IO.Path]::GetFullPath($CandidateRoot);$Stage=[IO.Path]::GetFullPath($Stage)
 $source=Join-Path $CandidateRoot 'bundle';$bundle=Join-Path $Stage 'TestKit'
-$zipPath=Join-Path $Stage 'fscopilot-0.9.10-two-player-test.zip'
+$zipPath=Join-Path $Stage 'fscopilot-0.9.12-two-player-test.zip'
 if(Test-Path -LiteralPath $zipPath){throw 'The test ZIP is already frozen. Do not overwrite it.'}
 $candidate=Get-Content -LiteralPath (Join-Path $CandidateRoot 'candidate.json') -Raw | ConvertFrom-Json
-if($candidate.version -ne '0.9.10'){throw 'Expected the frozen 0.9.10 candidate.'}
+if($candidate.version -ne '0.9.12'){throw 'Expected the frozen 0.9.12 candidate.'}
 New-Item -ItemType Directory -Path $bundle -Force | Out-Null
 $paths=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
 foreach($payload in $candidate.payloads){
@@ -34,9 +34,9 @@ $payloads=@(foreach($path in $paths | Sort-Object){
     $file=Get-Item -LiteralPath (Join-Path $bundle $path)
     [pscustomobject]@{path=$path;bytes=$file.Length;sha256=(Get-FileHash -LiteralPath $file.FullName).Hash}
 })
-$manifest=[pscustomobject]@{schema=1;version='0.9.10';sourceZipSha256=$candidate.sha256;mutableFiles=@('TEST RESULTS.txt','Reports/');payloads=$payloads;simulatorValidation='0.9.9 failed before native initialization. 0.9.10 removes large stack temporaries and passes a new compiled-WASM frame budget check; actual MSFS startup/Force/monitor and two-PC validation pending. Settings and update rates unchanged.'}
+$manifest=[pscustomobject]@{schema=1;version='0.9.12';sourceZipSha256=$candidate.sha256;mutableFiles=@('TEST RESULTS.txt','Reports/');payloads=$payloads;simulatorValidation='0.9.12 scopes Windows cockpit/AP send counters and retired-drop notifications to the current session binding. Production-client tests keep the SDK connection alive across rejoins; SDK I/O is simulated. Includes 0.9.11 control-value isolation. Actual two-PC MSFS rejoin/engine-start validation pending; saved setup and rates unchanged.'}
 [IO.File]::WriteAllText((Join-Path $bundle 'test-kit.json'),($manifest | ConvertTo-Json -Depth 8)+[Environment]::NewLine)
-Write-Output ('Prepared matching 0.9.10 test kit: '+$bundle)
+Write-Output ('Prepared matching 0.9.12 test kit: '+$bundle)
 if(-not $Freeze){return}
 Add-Type -AssemblyName System.IO.Compression
 $files=@($payloads.path)+@('test-kit.json','TEST RESULTS.txt')
@@ -57,6 +57,6 @@ try{
         if($hash -ne (Get-FileHash -LiteralPath (Join-Path $bundle $path)).Hash){throw ('ZIP hash mismatch: '+$path)}
     }
 }finally{$archive.Dispose();$stream.Dispose()}
-$receipt=[pscustomobject]@{version='0.9.10';timestampUtc=[DateTimeOffset]::UtcNow.ToString('o');zip=$zipPath;bytes=(Get-Item -LiteralPath $zipPath).Length;sha256=(Get-FileHash -LiteralPath $zipPath).Hash;entries=$files.Count;sourceCandidateSha256=$candidate.sha256;unchangedBinaries=$true;twoPcSimulatorValidationPending=$true}
+$receipt=[pscustomobject]@{version='0.9.12';timestampUtc=[DateTimeOffset]::UtcNow.ToString('o');zip=$zipPath;bytes=(Get-Item -LiteralPath $zipPath).Length;sha256=(Get-FileHash -LiteralPath $zipPath).Hash;entries=$files.Count;sourceCandidateSha256=$candidate.sha256;unchangedBinaries=$true;twoPcSimulatorValidationPending=$true}
 [IO.File]::WriteAllText((Join-Path $Stage 'test-kit.json'),($receipt | ConvertTo-Json)+[Environment]::NewLine)
 Write-Output ('Frozen verified test ZIP: '+$receipt.bytes+' bytes; SHA256 '+$receipt.sha256)

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<AssetPackage Version="0.9.10">
+<AssetPackage Version="0.9.12">
   <ItemSettings><ContentType>MISC</ContentType><Title>FS Copilot Controls Test</Title><Manufacturer/><Creator>FS Copilot</Creator></ItemSettings>
   <Flags><VisibleInStore>false</VisibleInStore><CanBeReferenced>false</CanBeReferenced></Flags>
   <PackageOrderHint>MISC</PackageOrderHint>

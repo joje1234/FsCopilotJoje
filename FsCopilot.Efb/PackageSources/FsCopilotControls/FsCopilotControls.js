@@ -1800,7 +1800,7 @@ SOFTWARE.
             get unitsSettingsManager() { return this._unitsSettingsManager; }
             getIsSearchable() { return true; }
             getIsFavoritable() { return true; }
-            getVersion() { return '0.9.10'; }
+            getVersion() { return '0.9.12'; }
             async _install(props) {
                 this.bus = props.bus;
                 this._unitsSettingsManager = props.unitsSettingManager;

@@ -104,6 +104,8 @@ internal sealed class CppNativeSessionClient : INativeBackendClient, INativeGuid
     public void Hardware(uint axes, double position) {
         Exchange(3, axes, Enumerable.Repeat(position, 21).ToArray());
     }
+    public void ControlReadback(uint axes, double position) => Exchange(19, axes, Enumerable.Repeat(position, 21).ToArray());
+    public void ClearControlReadback(uint axes) => Exchange(20, axes);
     public bool TrySendGuidance(NativeGuidancePacket command, Func<Func<bool>, bool>? execute = null)
     {
         if (!NativeGuidanceSendGate.Allows(command, State, GuidanceState)) return false;
